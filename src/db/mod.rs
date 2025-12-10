@@ -134,6 +134,48 @@ impl Database {
         Ok(id)
     }
 
+    /// Update an existing spec
+    pub fn update_spec(&self, spec: &SpecData) -> Result<()> {
+        let id = &spec.spec_id;
+        let data_json = serde_json::to_string(spec).context("Failed to serialize spec")?;
+
+        self.conn
+            .execute(
+                r#"
+                UPDATE specs 
+                SET project = ?2, boundary = ?3, data = ?4, stage = ?5, updated_at = ?6
+                WHERE id = ?1
+                "#,
+                params![
+                    id,
+                    spec.project,
+                    spec.boundary.to_string(),
+                    data_json,
+                    spec.stage.to_string(),
+                    spec.history.updated_at
+                ],
+            )
+            .context("Failed to update spec")?;
+
+        // Update FTS index
+        self.conn
+            .execute(
+                "DELETE FROM specs_fts WHERE id = ?1",
+                params![id],
+            )
+            .context("Failed to delete from FTS")?;
+
+        let content = extract_searchable_content(spec);
+        self.conn
+            .execute(
+                "INSERT INTO specs_fts (id, project, boundary, name, content) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id, spec.project, spec.boundary.to_string(), spec.name, content],
+            )
+            .context("Failed to update FTS index")?;
+
+        Ok(())
+    }
+
     /// Get a spec by ID
     pub fn get_spec(&self, id: &str) -> Result<Option<SpecRow>> {
         let mut stmt = self.conn.prepare(

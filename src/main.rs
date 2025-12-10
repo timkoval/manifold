@@ -7,6 +7,7 @@ mod config;
 mod db;
 mod models;
 mod validation;
+mod mcp;
 
 use clap::{Parser, Subcommand};
 
@@ -80,9 +81,13 @@ enum Commands {
         #[arg(long)]
         no_dedup: bool,
     },
+
+    /// Start the MCP server (JSON-RPC 2.0 over stdio)
+    Serve,
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -116,6 +121,10 @@ fn main() -> anyhow::Result<()> {
             no_dedup,
         } => {
             commands::join(&source_id, &target_boundary, !no_dedup)?;
+        }
+        Commands::Serve => {
+            let mut server = mcp::McpServer::new()?;
+            server.run().await?;
         }
     }
 

@@ -21,8 +21,9 @@ regex = "1.10"
 jsonschema = "0.18"
 json-patch = "1.4"
 
-# Phase 3+
-# tokio = { version = "1", features = ["full"] }
+# Phase 3 - MCP Server
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
 
 # Phase 6+
 # ratatui = "0.28"

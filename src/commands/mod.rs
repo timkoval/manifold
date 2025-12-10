@@ -229,3 +229,129 @@ fn create_core_schema(paths: &ManifoldPaths) -> Result<()> {
         .context("Failed to write core.json schema")?;
     Ok(())
 }
+
+/// Validate a spec against the schema
+pub fn validate(id: &str, strict: bool) -> Result<()> {
+    let paths = ManifoldPaths::new()?;
+    ensure_initialized(&paths)?;
+
+    let db = Database::open(&paths)?;
+    let spec_row = db
+        .get_spec(id)?
+        .with_context(|| format!("Spec not found: {}", id))?;
+
+    // Parse spec data
+    let spec: SpecData = serde_json::from_value(spec_row.data)
+        .context("Failed to parse spec data")?;
+
+    println!("Validating spec: {}", id);
+    println!();
+
+    // Schema validation
+    print!("Schema validation... ");
+    match crate::validation::validate_spec(&spec) {
+        Ok(_) => println!("✓ passed"),
+        Err(e) => {
+            println!("✗ failed");
+            println!("{}", e);
+            bail!("Schema validation failed");
+        }
+    }
+
+    // Linting
+    print!("Linting... ");
+    let warnings = crate::validation::lint_spec(&spec);
+    if warnings.is_empty() {
+        println!("✓ no warnings");
+    } else {
+        println!("⚠ {} warning(s)", warnings.len());
+        for warning in &warnings {
+            println!("  ⚠ {}", warning);
+        }
+        if strict {
+            bail!("Validation failed in strict mode due to warnings");
+        }
+    }
+
+    println!();
+    println!("Validation complete!");
+    Ok(())
+}
+
+/// Join (merge) a spec into another boundary
+pub fn join(source_id: &str, target_boundary: &str, dedup: bool) -> Result<()> {
+    let paths = ManifoldPaths::new()?;
+    ensure_initialized(&paths)?;
+
+    let target_boundary = target_boundary
+        .parse::<Boundary>()
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    let db = Database::open(&paths)?;
+    
+    // Get source spec
+    let source_row = db
+        .get_spec(source_id)?
+        .with_context(|| format!("Source spec not found: {}", source_id))?;
+
+    let mut source_spec: SpecData = serde_json::from_value(source_row.data)
+        .context("Failed to parse source spec")?;
+
+    println!("Joining spec: {} → {}", source_id, target_boundary);
+    println!("  Source boundary: {}", source_spec.boundary);
+    println!();
+
+    // Check if already in target boundary
+    if source_spec.boundary == target_boundary {
+        bail!("Spec is already in the target boundary");
+    }
+
+    // Deduplication: check for existing specs in target boundary with same project
+    if dedup {
+        print!("Checking for duplicates... ");
+        let existing = db.list_specs(Some(&target_boundary), std::option::Option::None)?;
+        let duplicates: Vec<_> = existing
+            .iter()
+            .filter(|s| s.project == source_spec.project)
+            .collect();
+
+        if !duplicates.is_empty() {
+            println!("found {} duplicate(s)", duplicates.len());
+            for dup in &duplicates {
+                println!("  - {}: {}", dup.id, dup.data.get("name").and_then(|v| v.as_str()).unwrap_or("?"));
+            }
+            
+            // For now, just warn - in future we could implement merging logic
+            println!();
+            println!("⚠ Warning: Duplicates exist in target boundary");
+            println!("  Creating a separate spec anyway...");
+        } else {
+            println!("✓ none");
+        }
+    }
+
+    // Create new spec in target boundary
+    let new_spec_id = crate::db::generate_spec_id(&source_spec.project);
+    source_spec.spec_id = new_spec_id.clone();
+    let old_boundary = source_spec.boundary.clone();
+    source_spec.boundary = target_boundary;
+    
+    // Update history
+    source_spec.history.updated_at = chrono::Utc::now().timestamp();
+    source_spec.history.patches.push(crate::models::PatchEntry {
+        timestamp: chrono::Utc::now().timestamp(),
+        actor: "user".to_string(),
+        op: "join".to_string(),
+        path: "/boundary".to_string(),
+        summary: format!("Joined from {} to {}", old_boundary, source_spec.boundary),
+    });
+
+    db.insert_spec(&source_spec)?;
+
+    println!();
+    println!("✓ Created new spec in target boundary: {}", new_spec_id);
+    println!();
+    println!("Note: Original spec in {} boundary is unchanged", source_row.boundary);
+
+    Ok(())
+}

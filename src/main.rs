@@ -6,6 +6,7 @@ mod commands;
 mod config;
 mod db;
 mod models;
+mod validation;
 
 use clap::{Parser, Subcommand};
 
@@ -56,6 +57,29 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Validate a spec against the schema
+    Validate {
+        /// Spec ID
+        id: String,
+
+        /// Strict mode (fail on warnings)
+        #[arg(long)]
+        strict: bool,
+    },
+
+    /// Join (merge) a spec into another boundary
+    Join {
+        /// Source spec ID
+        source_id: String,
+
+        /// Target boundary (personal, work, company)
+        target_boundary: String,
+
+        /// Skip deduplication
+        #[arg(long)]
+        no_dedup: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -82,6 +106,16 @@ fn main() -> anyhow::Result<()> {
                 commands::OutputFormat::Summary
             };
             commands::show(&id, format)?;
+        }
+        Commands::Validate { id, strict } => {
+            commands::validate(&id, strict)?;
+        }
+        Commands::Join {
+            source_id,
+            target_boundary,
+            no_dedup,
+        } => {
+            commands::join(&source_id, &target_boundary, !no_dedup)?;
         }
     }
 

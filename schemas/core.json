@@ -1,0 +1,281 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "manifold://core/v1",
+  "title": "Manifold Spec (LLM-Native)",
+  "description": "Core schema for manifold specifications - optimized for LLM consumption",
+  "type": "object",
+  "required": ["spec_id", "project", "boundary", "name", "stage", "history"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "manifold://core/v1",
+      "description": "Schema identifier"
+    },
+    "spec_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Unique spec identifier (kebab-case)"
+    },
+    "project": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Project identifier"
+    },
+    "boundary": {
+      "type": "string",
+      "enum": ["personal", "work", "company"],
+      "description": "Isolation boundary"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable name"
+    },
+    "stage": {
+      "type": "string",
+      "enum": ["requirements", "design", "tasks", "approval", "implemented"],
+      "description": "Current workflow stage"
+    },
+    "stages_completed": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["requirements", "design", "tasks", "approval", "implemented"]
+      },
+      "description": "Completed workflow stages"
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/requirement"
+      },
+      "description": "Flat list of requirements"
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/task"
+      },
+      "description": "Flat list of tasks"
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/decision"
+      },
+      "description": "Design decisions"
+    },
+    "history": {
+      "$ref": "#/$defs/history"
+    }
+  },
+  "$defs": {
+    "requirement": {
+      "type": "object",
+      "required": ["id", "capability", "title", "shall"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^req-[0-9]+$"
+        },
+        "capability": {
+          "type": "string",
+          "description": "Capability this requirement belongs to"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shall": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The SHALL/MUST statement"
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Why this requirement exists"
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["must", "should", "could", "wont"],
+          "default": "should"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scenario"
+          }
+        }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "required": ["id", "name", "given", "when", "then"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^sc-[0-9]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "given": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Preconditions (array of strings)"
+        },
+        "when": {
+          "type": "string",
+          "description": "The trigger or action"
+        },
+        "then": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Expected outcomes (array of strings)"
+        },
+        "edge_cases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Edge cases to consider"
+        }
+      }
+    },
+    "task": {
+      "type": "object",
+      "required": ["id", "requirement_ids", "title", "description", "status"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^task-[0-9]+$"
+        },
+        "requirement_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^req-[0-9]+$"
+          },
+          "description": "Requirements this task implements"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "in_progress", "completed", "blocked"]
+        },
+        "assignee": {
+          "type": "string",
+          "description": "Who is working on this"
+        },
+        "acceptance": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Acceptance criteria"
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": ["id", "title", "context", "decision", "rationale", "date"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^dec-[0-9]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context": {
+          "type": "string",
+          "description": "The problem or question"
+        },
+        "decision": {
+          "type": "string",
+          "description": "What was decided"
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Why this decision was made"
+        },
+        "alternatives_rejected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Other options considered"
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "When this decision was made"
+        }
+      }
+    },
+    "history": {
+      "type": "object",
+      "required": ["created_at", "updated_at"],
+      "properties": {
+        "created_at": {
+          "type": "integer",
+          "description": "Unix timestamp"
+        },
+        "updated_at": {
+          "type": "integer",
+          "description": "Unix timestamp"
+        },
+        "patches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/patch_entry"
+          }
+        }
+      }
+    },
+    "patch_entry": {
+      "type": "object",
+      "required": ["timestamp", "actor", "op", "path", "summary"],
+      "properties": {
+        "timestamp": {
+          "type": "integer"
+        },
+        "actor": {
+          "type": "string",
+          "description": "User or agent who made the change"
+        },
+        "op": {
+          "type": "string",
+          "description": "JSON Patch operation type"
+        },
+        "path": {
+          "type": "string",
+          "description": "JSON Patch path"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Human-readable summary of the change"
+        }
+      }
+    }
+  }
+}

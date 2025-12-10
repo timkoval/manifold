@@ -1,0 +1,28 @@
+[package]
+name = "manifold"
+version = "0.1.0"
+edition = "2021"
+description = "A local-first, MCP-native, JSON-canonical specification engine"
+authors = ["Taras Koval"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.31", features = ["bundled", "vtab"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+dirs = "5.0"
+toml = "0.8"
+chrono = "0.4"
+uuid = { version = "1.0", features = ["v4"] }
+
+# Phase 2+
+# jsonschema = "0.18"
+# json-patch = "2.0"
+
+# Phase 3+
+# tokio = { version = "1", features = ["full"] }
+
+# Phase 6+
+# ratatui = "0.28"
+# crossterm = "0.28"

@@ -38,6 +38,9 @@ Traditional spec formats (Markdown, YAML) are optimized for humans. Manifold opt
 - ✅ **Full-Text Search** - FTS5-powered search across all specs
 - ✅ **Boundary Isolation** - Separate personal/work/company specs
 - ✅ **Change Tracking** - Complete history with JSON Patch operations
+- ✅ **Git-Based Sync** - Collaborate with team using git workflows
+- ✅ **Conflict Resolution** - Automatic and manual conflict detection/resolution
+- ✅ **Review & Approval** - Formal review workflow for spec changes
 
 ### User Interfaces
 - ✅ **CLI Commands** - Full-featured command-line interface
@@ -185,6 +188,26 @@ manifold workflow <id> --operation advance
 manifold workflow <id> --operation history
 ```
 
+### Collaboration
+```bash
+# Git-based sync
+manifold sync init --repo ~/sync-dir
+manifold sync push <id> --message "Update requirements"
+manifold sync pull <id>
+manifold sync status
+
+# Review & approval
+manifold review request <spec-id> --reviewer alice@example.com
+manifold review approve <review-id> --comment "LGTM"
+manifold review list --spec-id <id>
+
+# Conflict resolution
+manifold conflicts list
+manifold conflicts resolve <conflict-id> --strategy ours|theirs|merge
+```
+
+See [docs/COLLABORATION.md](docs/COLLABORATION.md) for detailed examples.
+
 ### Export
 ```bash
 manifold export <id> -o output.md
@@ -224,7 +247,15 @@ The Terminal UI provides a rich, interactive experience:
 
 **Features:**
 - Two-pane layout with spec list and detail view
-- 5 tabs: Overview, Requirements, Tasks, Decisions, History
+- 6 tabs: Overview, Requirements, Tasks, Decisions, History, **Conflicts**
+- Boundary filtering (1-4 keys)
+- Real-time refresh (r key)
+- Workflow visualization with progress indicators
+- **Conflict resolution** with visual diffs and multiple strategies
+- **Bulk operations** for resolving multiple conflicts at once
+- **Auto-merge** for compatible changes
+- **Manual editing** with inline text input
+- **Real-time statistics** showing resolved/unresolved conflicts
 - Visual workflow progress indicators
 - Keyboard navigation (vim-style)
 - Real-time filtering by boundary
@@ -371,6 +402,7 @@ docker-compose --profile export up manifold-export
 
 ## 📂 Directory Structure
 
+### User Data (~/.manifold/)
 ```
 ~/.manifold/
 ├── config.toml                  # Configuration
@@ -380,6 +412,39 @@ docker-compose --profile export up manifold-export
 │   └── core.json                # JSON Schema for validation
 ├── exports/                     # Markdown/PDF exports
 └── cache/                       # Temporary files
+```
+
+### Project Structure
+```
+manifold/
+├── demos/                       # Demo scripts
+│   ├── demo_collab.sh          # Collaboration features demo
+│   ├── demo_phase11.sh         # Enhanced TUI demo
+│   ├── demo_phase5.sh          # LLM editing demo
+│   ├── demo_phase6.sh          # TUI dashboard demo
+│   ├── demo_phase7.sh          # Export demo
+│   └── test_mcp.sh             # MCP server test
+├── docs/                        # Documentation
+│   ├── COLLABORATION.md        # Collaboration guide
+│   ├── COLLABORATION_IMPLEMENTATION.md
+│   ├── ENHANCEMENTS.md         # Roadmap
+│   ├── PHASE11_SUMMARY.md      # Phase 11 summary
+│   ├── TUI_CONFLICTS.md        # TUI implementation
+│   ├── TUI_ENHANCEMENTS.md     # TUI features
+│   └── TUI_QUICK_REFERENCE.md  # Quick reference
+├── schemas/
+│   └── core.json               # JSON Schema
+├── src/                         # Rust source code
+│   ├── collab/                 # Collaboration features
+│   ├── commands/               # CLI commands
+│   ├── db/                     # Database layer
+│   ├── mcp/                    # MCP server
+│   ├── tui/                    # Terminal UI
+│   └── ...
+├── Cargo.toml                   # Rust dependencies
+├── Dockerfile                   # Docker image
+├── docker-compose.yml          # Docker Compose config
+└── README.md                    # This file
 ```
 
 ## 🎯 Workflow Engine
@@ -429,6 +494,9 @@ requirements → design → tasks → approval → implemented
 - ✅ **Phase 6** - Ratatui TUI dashboard
 - ✅ **Phase 7** - Markdown renderer & export
 - ✅ **Phase 8** - Docker deployment
+- ✅ **Phase 9** - Collaboration features (git sync, conflicts, reviews)
+- ✅ **Phase 10** - TUI conflict resolution
+- ✅ **Phase 11** - Enhanced TUI (manual editing, bulk ops, auto-merge)
 
 ## 🧪 Testing
 
@@ -437,21 +505,23 @@ requirements → design → tasks → approval → implemented
 cargo test
 
 # Run with demo data
-./demo_phase5.sh   # LLM editing session demo
-./demo_phase6.sh   # TUI dashboard demo
-./demo_phase7.sh   # Markdown export demo
+./demos/demo_phase5.sh   # LLM editing session demo
+./demos/demo_phase6.sh   # TUI dashboard demo
+./demos/demo_phase7.sh   # Markdown export demo
+./demos/demo_collab.sh   # Collaboration features demo
+./demos/demo_phase11.sh  # Enhanced TUI conflict resolution demo
 
 # Test MCP server
-./test_mcp.sh
+./demos/test_mcp.sh
 ```
 
 ## 🚧 Roadmap
 
-See [ENHANCEMENTS.md](ENHANCEMENTS.md) for detailed roadmap and potential improvements.
+See [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md) for detailed roadmap and potential improvements.
 
 ## 🤝 Contributing
 
-Contributions welcome! Please see [ENHANCEMENTS.md](ENHANCEMENTS.md) for ideas.
+Contributions welcome! Please see [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md) for ideas.
 
 ### Development Setup
 

@@ -5,6 +5,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 
+use crate::collab::{Conflict, ConflictStatus, Review, ReviewStatus, SyncMetadata, SyncStatus};
 use crate::config::ManifoldPaths;
 use crate::models::{Boundary, SpecData, SpecRow, WorkflowStage};
 
@@ -77,6 +78,60 @@ impl Database {
         )
         .context("Failed to create workflow_events table")?;
 
+        // Create sync metadata table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS sync_metadata (
+                spec_id           TEXT PRIMARY KEY,
+                last_sync_timestamp INTEGER NOT NULL,
+                last_sync_hash    TEXT NOT NULL,
+                remote_branch     TEXT,
+                sync_status       TEXT NOT NULL DEFAULT 'unsynced',
+                FOREIGN KEY (spec_id) REFERENCES specs(id)
+            )
+            "#,
+            [],
+        )
+        .context("Failed to create sync_metadata table")?;
+
+        // Create conflicts table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS conflicts (
+                id              TEXT PRIMARY KEY,
+                spec_id         TEXT NOT NULL,
+                field_path      TEXT NOT NULL,
+                local_value     TEXT NOT NULL,
+                remote_value    TEXT NOT NULL,
+                base_value      TEXT,
+                detected_at     INTEGER NOT NULL,
+                status          TEXT NOT NULL DEFAULT 'unresolved',
+                FOREIGN KEY (spec_id) REFERENCES specs(id)
+            )
+            "#,
+            [],
+        )
+        .context("Failed to create conflicts table")?;
+
+        // Create reviews table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS reviews (
+                id            TEXT PRIMARY KEY,
+                spec_id       TEXT NOT NULL,
+                requester     TEXT NOT NULL,
+                reviewer      TEXT NOT NULL,
+                status        TEXT NOT NULL DEFAULT 'pending',
+                comment       TEXT,
+                requested_at  INTEGER NOT NULL,
+                reviewed_at   INTEGER,
+                FOREIGN KEY (spec_id) REFERENCES specs(id)
+            )
+            "#,
+            [],
+        )
+        .context("Failed to create reviews table")?;
+
         // Create indexes
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project)",
@@ -92,6 +147,22 @@ impl Database {
         )?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_spec ON workflow_events(spec_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conflicts_spec ON conflicts(spec_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conflicts_status ON conflicts(status)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reviews_spec ON reviews(spec_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status)",
             [],
         )?;
 
@@ -333,6 +404,190 @@ impl Database {
             events.push(row?);
         }
         Ok(events)
+    }
+
+    // Collaboration methods
+
+    /// Save sync metadata
+    pub fn save_sync_metadata(&self, metadata: &SyncMetadata) -> Result<()> {
+        self.conn
+            .execute(
+                r#"
+                INSERT OR REPLACE INTO sync_metadata 
+                (spec_id, last_sync_timestamp, last_sync_hash, remote_branch, sync_status)
+                VALUES (?1, ?2, ?3, ?4, ?5)
+                "#,
+                params![
+                    metadata.spec_id,
+                    metadata.last_sync_timestamp,
+                    metadata.last_sync_hash,
+                    metadata.remote_branch,
+                    metadata.sync_status.to_string()
+                ],
+            )
+            .context("Failed to save sync metadata")?;
+        Ok(())
+    }
+
+    /// Get sync metadata for a spec
+    pub fn get_sync_metadata(&self, spec_id: &str) -> Result<Option<SyncMetadata>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT spec_id, last_sync_timestamp, last_sync_hash, remote_branch, sync_status FROM sync_metadata WHERE spec_id = ?1",
+        )?;
+
+        let result = stmt.query_row(params![spec_id], |row| {
+            Ok(SyncMetadata {
+                spec_id: row.get(0)?,
+                last_sync_timestamp: row.get(1)?,
+                last_sync_hash: row.get(2)?,
+                remote_branch: row.get(3)?,
+                sync_status: row.get::<_, String>(4)?.parse().unwrap_or(SyncStatus::Unsynced),
+            })
+        });
+
+        match result {
+            Ok(metadata) => Ok(Some(metadata)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Save conflict
+    pub fn save_conflict(&self, conflict: &Conflict) -> Result<()> {
+        self.conn
+            .execute(
+                r#"
+                INSERT OR REPLACE INTO conflicts 
+                (id, spec_id, field_path, local_value, remote_value, base_value, detected_at, status)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "#,
+                params![
+                    conflict.id,
+                    conflict.spec_id,
+                    conflict.field_path,
+                    serde_json::to_string(&conflict.local_value)?,
+                    serde_json::to_string(&conflict.remote_value)?,
+                    conflict.base_value.as_ref().map(|v| serde_json::to_string(v).ok()).flatten(),
+                    conflict.detected_at,
+                    conflict.status.to_string()
+                ],
+            )
+            .context("Failed to save conflict")?;
+        Ok(())
+    }
+
+    /// Get conflicts for a spec
+    pub fn get_conflicts(&self, spec_id: &str) -> Result<Vec<Conflict>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, spec_id, field_path, local_value, remote_value, base_value, detected_at, status FROM conflicts WHERE spec_id = ?1 AND status = 'unresolved'",
+        )?;
+
+        let rows = stmt.query_map(params![spec_id], |row| {
+            let base_value_str: Option<String> = row.get(5)?;
+            Ok(Conflict {
+                id: row.get(0)?,
+                spec_id: row.get(1)?,
+                field_path: row.get(2)?,
+                local_value: serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or_default(),
+                remote_value: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_default(),
+                base_value: base_value_str.and_then(|s| serde_json::from_str(&s).ok()),
+                detected_at: row.get(6)?,
+                status: row.get::<_, String>(7)?.parse().unwrap_or(ConflictStatus::Unresolved),
+            })
+        })?;
+
+        let mut conflicts = Vec::new();
+        for row in rows {
+            conflicts.push(row?);
+        }
+        Ok(conflicts)
+    }
+
+    /// Update conflict status
+    pub fn update_conflict_status(&self, conflict_id: &str, status: &ConflictStatus) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE conflicts SET status = ?1 WHERE id = ?2",
+                params![status.to_string(), conflict_id],
+            )
+            .context("Failed to update conflict status")?;
+        Ok(())
+    }
+
+    /// Save review
+    pub fn save_review(&self, review: &Review) -> Result<()> {
+        self.conn
+            .execute(
+                r#"
+                INSERT OR REPLACE INTO reviews 
+                (id, spec_id, requester, reviewer, status, comment, requested_at, reviewed_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "#,
+                params![
+                    review.id,
+                    review.spec_id,
+                    review.requester,
+                    review.reviewer,
+                    review.status.to_string(),
+                    review.comment,
+                    review.requested_at,
+                    review.reviewed_at
+                ],
+            )
+            .context("Failed to save review")?;
+        Ok(())
+    }
+
+    /// Get reviews for a spec
+    pub fn get_reviews(&self, spec_id: &str) -> Result<Vec<Review>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, spec_id, requester, reviewer, status, comment, requested_at, reviewed_at FROM reviews WHERE spec_id = ?1 ORDER BY requested_at DESC",
+        )?;
+
+        let rows = stmt.query_map(params![spec_id], |row| {
+            Ok(Review {
+                id: row.get(0)?,
+                spec_id: row.get(1)?,
+                requester: row.get(2)?,
+                reviewer: row.get(3)?,
+                status: row.get::<_, String>(4)?.parse().unwrap_or(ReviewStatus::Pending),
+                comment: row.get(5)?,
+                requested_at: row.get(6)?,
+                reviewed_at: row.get(7)?,
+            })
+        })?;
+
+        let mut reviews = Vec::new();
+        for row in rows {
+            reviews.push(row?);
+        }
+        Ok(reviews)
+    }
+
+    /// Get review by ID
+    pub fn get_review(&self, review_id: &str) -> Result<Option<Review>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, spec_id, requester, reviewer, status, comment, requested_at, reviewed_at FROM reviews WHERE id = ?1",
+        )?;
+
+        let result = stmt.query_row(params![review_id], |row| {
+            Ok(Review {
+                id: row.get(0)?,
+                spec_id: row.get(1)?,
+                requester: row.get(2)?,
+                reviewer: row.get(3)?,
+                status: row.get::<_, String>(4)?.parse().unwrap_or(ReviewStatus::Pending),
+                comment: row.get(5)?,
+                requested_at: row.get(6)?,
+                reviewed_at: row.get(7)?,
+            })
+        });
+
+        match result {
+            Ok(review) => Ok(Some(review)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 }
 

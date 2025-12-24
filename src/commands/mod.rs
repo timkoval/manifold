@@ -2,6 +2,10 @@
 
 use anyhow::{bail, Context, Result};
 
+use crate::collab::conflicts::ConflictResolver;
+use crate::collab::reviews::ReviewManager;
+use crate::collab::sync::SyncManager;
+use crate::collab::{ResolutionStrategy, SyncConfig};
 use crate::config::{save_config, Config, ManifoldPaths};
 use crate::db::Database;
 use crate::models::{Boundary, SpecData, WorkflowStage};
@@ -494,4 +498,344 @@ pub enum WorkflowOperation {
     Advance { target_stage: Option<String> },
     History,
     Status,
+}
+
+// Collaboration commands
+
+/// Sync command handler
+pub async fn sync_command(operation: crate::SyncOperation) -> Result<()> {
+    use crate::SyncOperation;
+    
+    let paths = ManifoldPaths::new()?;
+    ensure_initialized(&paths)?;
+
+    match operation {
+        SyncOperation::Init { repo, remote } => {
+            let repo_path = std::path::PathBuf::from(&repo);
+            let mut config = SyncConfig::new(repo_path);
+            
+            if let Some(url) = remote {
+                config.remote_url = Some(url.clone());
+            }
+
+            let manager = SyncManager::new(config.clone());
+            manager.init()?;
+
+            if let Some(url) = &config.remote_url {
+                manager.add_remote("origin", url)?;
+            }
+
+            println!("✓ Sync repository initialized");
+            println!("  Path: {}", repo);
+            if let Some(url) = config.remote_url {
+                println!("  Remote: {}", url);
+            }
+        }
+
+        SyncOperation::Push { id, message, remote, branch } => {
+            // Load sync config (in real impl, this would be stored)
+            let sync_dir = paths.root.join("sync");
+            let config = SyncConfig::new(sync_dir);
+            let manager = SyncManager::new(config);
+
+            let db = Database::open(&paths)?;
+
+            if id == "all" {
+                // Push all specs
+                let specs = db.list_specs(None, None)?;
+                let mut pushed_count = 0;
+
+                for spec_row in specs {
+                    let spec: SpecData = serde_json::from_value(spec_row.data)?;
+                    manager.export_spec(&spec)?;
+                    pushed_count += 1;
+                }
+
+                let commit_msg = message.unwrap_or_else(|| format!("Update {} specs", pushed_count));
+                let files: Vec<_> = (0..pushed_count).map(|_| std::path::PathBuf::new()).collect();
+                
+                if let Ok(hash) = manager.commit(&commit_msg, &[]) {
+                    if hash != "no-changes" {
+                        manager.push(&remote, &branch)?;
+                        println!("✓ Pushed {} specs (commit: {})", pushed_count, &hash[..8]);
+                    } else {
+                        println!("✓ No changes to push");
+                    }
+                }
+            } else {
+                // Push single spec
+                let spec_row = db.get_spec(&id)?.context("Spec not found")?;
+                let spec: SpecData = serde_json::from_value(spec_row.data)?;
+                
+                let file_path = manager.export_spec(&spec)?;
+                let commit_msg = message.unwrap_or_else(|| format!("Update spec: {}", id));
+                
+                let hash = manager.commit(&commit_msg, &[file_path])?;
+                if hash != "no-changes" {
+                    manager.push(&remote, &branch)?;
+                    println!("✓ Pushed spec {} (commit: {})", id, &hash[..8]);
+                } else {
+                    println!("✓ No changes to push");
+                }
+            }
+        }
+
+        SyncOperation::Pull { id, remote, branch } => {
+            let sync_dir = paths.root.join("sync");
+            let config = SyncConfig::new(sync_dir);
+            let manager = SyncManager::new(config);
+
+            manager.pull(&remote, &branch)?;
+
+            let db = Database::open(&paths)?;
+
+            if id == "all" {
+                // Pull all specs
+                let spec_ids = manager.list_specs()?;
+                let mut pulled_count = 0;
+
+                for spec_id in &spec_ids {
+                    match manager.import_spec(&spec_id) {
+                        Ok(remote_spec) => {
+                            // Check for conflicts
+                            if let Ok(Some(local_row)) = db.get_spec(&spec_id) {
+                                let local_spec: SpecData = serde_json::from_value(local_row.data)?;
+                                
+                                let conflicts = ConflictResolver::detect_conflicts(
+                                    &local_spec,
+                                    &remote_spec,
+                                    None,
+                                )?;
+
+                                if !conflicts.is_empty() {
+                                    println!("⚠ Conflict detected in spec: {}", spec_id);
+                                    for conflict in &conflicts {
+                                        db.save_conflict(conflict)?;
+                                    }
+                                    println!("  Run 'manifold conflicts list' to review");
+                                } else {
+                                    db.update_spec(&remote_spec)?;
+                                    pulled_count += 1;
+                                }
+                            } else {
+                                db.insert_spec(&remote_spec)?;
+                                pulled_count += 1;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("⚠ Failed to import {}: {}", spec_id, e);
+                        }
+                    }
+                }
+
+                println!("✓ Pulled {} specs", pulled_count);
+            } else {
+                // Pull single spec
+                let remote_spec = manager.import_spec(&id)?;
+                
+                if let Ok(Some(local_row)) = db.get_spec(&id) {
+                    let local_spec: SpecData = serde_json::from_value(local_row.data)?;
+                    
+                    let conflicts = ConflictResolver::detect_conflicts(
+                        &local_spec,
+                        &remote_spec,
+                        None,
+                    )?;
+
+                    if !conflicts.is_empty() {
+                        println!("⚠ Conflict detected in spec: {}", id);
+                        for conflict in &conflicts {
+                            db.save_conflict(conflict)?;
+                            println!("  {}", ConflictResolver::format_conflict(conflict));
+                        }
+                        println!();
+                        println!("Run 'manifold conflicts resolve <conflict-id>' to resolve");
+                    } else {
+                        db.update_spec(&remote_spec)?;
+                        println!("✓ Pulled spec: {}", id);
+                    }
+                } else {
+                    db.insert_spec(&remote_spec)?;
+                    println!("✓ Pulled new spec: {}", id);
+                }
+            }
+        }
+
+        SyncOperation::Status => {
+            let sync_dir = paths.root.join("sync");
+            let config = SyncConfig::new(sync_dir);
+            let manager = SyncManager::new(config);
+
+            println!("Sync status:");
+            println!("{}", "=".repeat(60));
+
+            let modified_files = manager.status()?;
+            
+            if modified_files.is_empty() {
+                println!("✓ No local modifications");
+            } else {
+                println!("Modified specs:");
+                for file in modified_files {
+                    println!("  {}", file);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Review command handler
+pub fn review_command(operation: crate::ReviewOperation) -> Result<()> {
+    use crate::ReviewOperation;
+    
+    let paths = ManifoldPaths::new()?;
+    ensure_initialized(&paths)?;
+    let db = Database::open(&paths)?;
+
+    // Get current user (in real impl, this would come from config)
+    let current_user = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
+
+    match operation {
+        ReviewOperation::Request { spec_id, reviewer } => {
+            // Check spec exists
+            db.get_spec(&spec_id)?.context("Spec not found")?;
+
+            let review = ReviewManager::create_review(
+                spec_id.clone(),
+                current_user.clone(),
+                reviewer.clone(),
+            );
+
+            db.save_review(&review)?;
+
+            println!("✓ Review requested");
+            println!("  Review ID: {}", review.id);
+            println!("  Spec: {}", spec_id);
+            println!("  Reviewer: {}", reviewer);
+        }
+
+        ReviewOperation::Approve { review_id, comment } => {
+            let mut review = db.get_review(&review_id)?.context("Review not found")?;
+
+            ReviewManager::approve(&mut review, &current_user, comment)?;
+            db.save_review(&review)?;
+
+            println!("✓ Review approved");
+            println!("{}", ReviewManager::format_review(&review));
+        }
+
+        ReviewOperation::Reject { review_id, comment } => {
+            let mut review = db.get_review(&review_id)?.context("Review not found")?;
+
+            ReviewManager::reject(&mut review, &current_user, comment)?;
+            db.save_review(&review)?;
+
+            println!("✓ Review rejected");
+            println!("{}", ReviewManager::format_review(&review));
+        }
+
+        ReviewOperation::List { spec_id, status } => {
+            let reviews = if let Some(spec_id) = spec_id {
+                db.get_reviews(&spec_id)?
+            } else {
+                // Would need to add a method to get all reviews
+                Vec::new()
+            };
+
+            let filtered: Vec<_> = if let Some(status_filter) = status {
+                reviews.into_iter().filter(|r| r.status.to_string() == status_filter).collect()
+            } else {
+                reviews
+            };
+
+            if filtered.is_empty() {
+                println!("No reviews found");
+            } else {
+                println!("Reviews:");
+                println!("{}", "=".repeat(60));
+                for review in &filtered {
+                    println!("{}", ReviewManager::format_review(review));
+                    println!();
+                }
+
+                let stats = ReviewManager::get_stats(&filtered);
+                println!("{}", stats.format());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Conflict command handler
+pub fn conflict_command(operation: crate::ConflictOperation) -> Result<()> {
+    use crate::ConflictOperation;
+    
+    let paths = ManifoldPaths::new()?;
+    ensure_initialized(&paths)?;
+    let db = Database::open(&paths)?;
+
+    match operation {
+        ConflictOperation::List { spec_id } => {
+            let conflicts = if let Some(spec_id) = spec_id {
+                db.get_conflicts(&spec_id)?
+            } else {
+                // Would need method to get all conflicts
+                Vec::new()
+            };
+
+            if conflicts.is_empty() {
+                println!("✓ No conflicts");
+            } else {
+                println!("Conflicts:");
+                println!("{}", "=".repeat(60));
+                for conflict in conflicts {
+                    println!("ID: {}", conflict.id);
+                    println!("{}", ConflictResolver::format_conflict(&conflict));
+                    println!();
+                }
+            }
+        }
+
+        ConflictOperation::Resolve { conflict_id, strategy } => {
+            let conflicts = db.get_conflicts("")?; // Get all conflicts
+            let conflict = conflicts.iter()
+                .find(|c| c.id == conflict_id)
+                .context("Conflict not found")?;
+
+            let resolution_strategy = match strategy.as_str() {
+                "ours" => ResolutionStrategy::Ours,
+                "theirs" => ResolutionStrategy::Theirs,
+                "manual" => ResolutionStrategy::Manual,
+                "merge" => ResolutionStrategy::Merge,
+                _ => bail!("Invalid strategy. Use: ours, theirs, manual, or merge"),
+            };
+
+            println!("Resolving conflict:");
+            println!("{}", ConflictResolver::format_conflict(conflict));
+            println!();
+
+            let (resolved_value, status) = ConflictResolver::resolve_conflict(
+                conflict,
+                resolution_strategy,
+                None,
+            )?;
+
+            // Update conflict status
+            db.update_conflict_status(&conflict_id, &status)?;
+
+            // Apply resolution to spec
+            let spec_row = db.get_spec(&conflict.spec_id)?.context("Spec not found")?;
+            let mut spec: SpecData = serde_json::from_value(spec_row.data)?;
+
+            ConflictResolver::apply_resolutions(&mut spec, &[(conflict.field_path.clone(), resolved_value)])?;
+            db.update_spec(&spec)?;
+
+            println!("✓ Conflict resolved with strategy: {}", strategy);
+            println!("  Status: {}", status);
+        }
+    }
+
+    Ok(())
 }

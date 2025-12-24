@@ -12,6 +12,7 @@ mod workflow;
 mod llm;
 mod tui;
 mod export;
+mod collab;
 
 use clap::{Parser, Subcommand};
 
@@ -125,6 +126,134 @@ enum Commands {
         #[arg(long)]
         tables: bool,
     },
+
+    /// Git-based sync operations
+    Sync {
+        #[command(subcommand)]
+        operation: SyncOperation,
+    },
+
+    /// Review and approval operations
+    Review {
+        #[command(subcommand)]
+        operation: ReviewOperation,
+    },
+
+    /// Conflict resolution operations
+    Conflicts {
+        #[command(subcommand)]
+        operation: ConflictOperation,
+    },
+}
+
+#[derive(Subcommand)]
+enum SyncOperation {
+    /// Initialize sync repository
+    Init {
+        /// Path to git repository
+        #[arg(short, long)]
+        repo: String,
+
+        /// Remote URL (optional)
+        #[arg(short, long)]
+        remote: Option<String>,
+    },
+
+    /// Push spec(s) to git repository
+    Push {
+        /// Spec ID (or 'all' for all specs)
+        id: String,
+
+        /// Commit message
+        #[arg(short, long)]
+        message: Option<String>,
+
+        /// Remote name
+        #[arg(long, default_value = "origin")]
+        remote: String,
+
+        /// Branch name
+        #[arg(long, default_value = "main")]
+        branch: String,
+    },
+
+    /// Pull spec(s) from git repository
+    Pull {
+        /// Spec ID (or 'all' for all specs)
+        id: String,
+
+        /// Remote name
+        #[arg(long, default_value = "origin")]
+        remote: String,
+
+        /// Branch name
+        #[arg(long, default_value = "main")]
+        branch: String,
+    },
+
+    /// Show sync status
+    Status,
+}
+
+#[derive(Subcommand)]
+enum ReviewOperation {
+    /// Request a review
+    Request {
+        /// Spec ID
+        spec_id: String,
+
+        /// Reviewer email or username
+        reviewer: String,
+    },
+
+    /// Approve a review
+    Approve {
+        /// Review ID
+        review_id: String,
+
+        /// Optional comment
+        #[arg(short, long)]
+        comment: Option<String>,
+    },
+
+    /// Reject a review
+    Reject {
+        /// Review ID
+        review_id: String,
+
+        /// Required rejection comment
+        #[arg(short, long)]
+        comment: String,
+    },
+
+    /// List reviews
+    List {
+        /// Spec ID (optional)
+        spec_id: Option<String>,
+
+        /// Filter by status
+        #[arg(long)]
+        status: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConflictOperation {
+    /// List conflicts
+    List {
+        /// Spec ID (optional)
+        spec_id: Option<String>,
+    },
+
+    /// Resolve a conflict
+    Resolve {
+        /// Conflict ID
+        conflict_id: String,
+
+        /// Resolution strategy: ours, theirs, manual
+        #[arg(short, long, default_value = "manual")]
+        strategy: String,
+    },
 }
 
 #[tokio::main]
@@ -216,6 +345,15 @@ async fn main() -> anyhow::Result<()> {
                 export::MarkdownRenderer::export_to_file(&spec, output_path, tables)?;
                 println!("✓ Exported spec {} to {}", id, output);
             }
+        }
+        Commands::Sync { operation } => {
+            commands::sync_command(operation).await?;
+        }
+        Commands::Review { operation } => {
+            commands::review_command(operation)?;
+        }
+        Commands::Conflicts { operation } => {
+            commands::conflict_command(operation)?;
         }
     }
 

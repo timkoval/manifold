@@ -8,6 +8,10 @@ mod db;
 mod models;
 mod validation;
 mod mcp;
+mod workflow;
+mod llm;
+mod tui;
+mod export;
 
 use clap::{Parser, Subcommand};
 
@@ -84,6 +88,43 @@ enum Commands {
 
     /// Start the MCP server (JSON-RPC 2.0 over stdio)
     Serve,
+
+    /// Workflow operations (advance stage, show history)
+    Workflow {
+        /// Spec ID
+        id: String,
+
+        /// Operation: advance, history, or status
+        #[arg(short, long, default_value = "status")]
+        operation: String,
+
+        /// Target stage for advance operation (optional, auto-advances if not specified)
+        #[arg(long)]
+        stage: Option<String>,
+    },
+
+    /// Interactive LLM editing session
+    Edit {
+        /// Spec ID to edit
+        id: String,
+    },
+
+    /// Launch TUI dashboard
+    Tui,
+
+    /// Export spec(s) to Markdown
+    Export {
+        /// Spec ID (or 'all' for all specs)
+        id: String,
+
+        /// Output file path
+        #[arg(short, long)]
+        output: String,
+
+        /// Use table formatting
+        #[arg(long)]
+        tables: bool,
+    },
 }
 
 #[tokio::main]
@@ -125,6 +166,56 @@ async fn main() -> anyhow::Result<()> {
         Commands::Serve => {
             let mut server = mcp::McpServer::new()?;
             server.run().await?;
+        }
+        Commands::Workflow { id, operation, stage } => {
+            let op = match operation.as_str() {
+                "advance" => commands::WorkflowOperation::Advance {
+                    target_stage: stage,
+                },
+                "history" => commands::WorkflowOperation::History,
+                "status" => commands::WorkflowOperation::Status,
+                _ => {
+                    eprintln!("Invalid operation: {}. Use: advance, history, or status", operation);
+                    std::process::exit(1);
+                }
+            };
+            commands::workflow(&id, op)?;
+        }
+        Commands::Edit { id } => {
+            let paths = config::ManifoldPaths::new()?;
+            let mut session = llm::LlmSession::new(id, &paths)?;
+            session.run().await?;
+        }
+        Commands::Tui => {
+            let paths = config::ManifoldPaths::new()?;
+            let mut app = tui::TuiApp::new(&paths)?;
+            app.run()?;
+        }
+        Commands::Export { id, output, tables } => {
+            let paths = config::ManifoldPaths::new()?;
+            let db = db::Database::open(&paths)?;
+            
+            let output_path = std::path::Path::new(&output);
+            
+            if id == "all" {
+                // Export all specs
+                let spec_rows = db.list_specs(None, None)?;
+                let specs: Vec<models::SpecData> = spec_rows
+                    .into_iter()
+                    .filter_map(|row| serde_json::from_value(row.data).ok())
+                    .collect();
+                
+                export::MarkdownRenderer::export_multi(&specs, output_path, tables)?;
+                println!("✓ Exported {} specs to {}", specs.len(), output);
+            } else {
+                // Export single spec
+                let spec_row = db.get_spec(&id)?
+                    .ok_or_else(|| anyhow::anyhow!("Spec not found: {}", id))?;
+                let spec: models::SpecData = serde_json::from_value(spec_row.data)?;
+                
+                export::MarkdownRenderer::export_to_file(&spec, output_path, tables)?;
+                println!("✓ Exported spec {} to {}", id, output);
+            }
         }
     }
 

@@ -5,6 +5,7 @@ use anyhow::{bail, Context, Result};
 use crate::config::{save_config, Config, ManifoldPaths};
 use crate::db::Database;
 use crate::models::{Boundary, SpecData, WorkflowStage};
+use crate::workflow::{WorkflowEngine, WorkflowError};
 
 /// Initialize manifold for first-time setup
 pub fn init() -> Result<()> {
@@ -354,4 +355,143 @@ pub fn join(source_id: &str, target_boundary: &str, dedup: bool) -> Result<()> {
     println!("Note: Original spec in {} boundary is unchanged", source_row.boundary);
 
     Ok(())
+}
+
+/// Workflow operations: advance stage or show history
+pub fn workflow(id: &str, operation: WorkflowOperation) -> Result<()> {
+    let paths = ManifoldPaths::new()?;
+    ensure_initialized(&paths)?;
+
+    let db = Database::open(&paths)?;
+    let spec_row = db
+        .get_spec(id)?
+        .with_context(|| format!("Spec not found: {}", id))?;
+
+    let mut spec: SpecData = serde_json::from_value(spec_row.data)
+        .context("Failed to parse spec data")?;
+
+    match operation {
+        WorkflowOperation::Advance { target_stage } => {
+            println!("Current stage: {}", spec.stage);
+            
+            let target_stage = match target_stage {
+                Some(stage_str) => {
+                    stage_str.parse::<WorkflowStage>().map_err(|e| anyhow::anyhow!(e))?
+                }
+                None => {
+                    // Auto-advance to next stage
+                    match WorkflowEngine::can_advance(&spec) {
+                        Ok(next) => next,
+                        Err(e) => {
+                            println!("✗ Cannot advance: {}", e);
+                            return Err(e.into());
+                        }
+                    }
+                }
+            };
+            
+            println!("Target stage:  {}", target_stage);
+            println!();
+            
+            // Validate and execute transition
+            match WorkflowEngine::advance_stage(&spec, target_stage) {
+                Ok(transition) => {
+                    println!("✓ Validation passed");
+                    
+                    // Update spec
+                    let old_stage = spec.stage.clone();
+                    if !spec.stages_completed.contains(&old_stage) {
+                        spec.stages_completed.push(old_stage.clone());
+                    }
+                    spec.stage = transition.to.clone();
+                    spec.history.updated_at = chrono::Utc::now().timestamp();
+                    
+                    // Log event
+                    let timestamp = spec.history.updated_at;
+                    db.log_workflow_event(
+                        &spec.spec_id,
+                        &transition.to.to_string(),
+                        &transition.event.as_string(),
+                        "user",
+                        timestamp,
+                        Some(&format!("Advanced from {} to {}", transition.from, transition.to)),
+                    )?;
+                    
+                    // Update database
+                    db.update_spec(&spec)?;
+                    
+                    println!("✓ Advanced to stage: {}", spec.stage);
+                    println!();
+                    println!("Stages completed: {:?}", spec.stages_completed);
+                }
+                Err(e) => {
+                    println!("✗ Transition failed: {}", e);
+                    
+                    // Log failed validation
+                    if let WorkflowError::ValidationFailed(msg) = &e {
+                        db.log_workflow_event(
+                            &spec.spec_id,
+                            &spec.stage.to_string(),
+                            &format!("validation_failed:{}", msg),
+                            "user",
+                            chrono::Utc::now().timestamp(),
+                            Some(&e.to_string()),
+                        )?;
+                    }
+                    
+                    return Err(e.into());
+                }
+            }
+        }
+        
+        WorkflowOperation::History => {
+            println!("Workflow history for: {}", id);
+            println!("{}", "=".repeat(80));
+            
+            let events = db.get_workflow_events(id)?;
+            
+            if events.is_empty() {
+                println!("No workflow events recorded");
+            } else {
+                for event in events {
+                    println!(
+                        "{} | {} | {} | {}",
+                        format_timestamp(event.timestamp),
+                        event.stage,
+                        event.event,
+                        event.actor
+                    );
+                    if let Some(details) = event.details {
+                        println!("  {}", details);
+                    }
+                }
+            }
+        }
+        
+        WorkflowOperation::Status => {
+            println!("Workflow status for: {}", id);
+            println!("{}", "=".repeat(50));
+            println!("Current stage: {}", spec.stage);
+            println!("Stages completed: {:?}", spec.stages_completed);
+            println!();
+            
+            match WorkflowEngine::can_advance(&spec) {
+                Ok(next_stage) => {
+                    println!("✓ Can advance to: {}", next_stage);
+                }
+                Err(e) => {
+                    println!("✗ Cannot advance: {}", e);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub enum WorkflowOperation {
+    Advance { target_stage: Option<String> },
+    History,
+    Status,
 }

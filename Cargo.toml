@@ -25,6 +25,13 @@ json-patch = "1.4"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 
-# Phase 6+
-# ratatui = "0.28"
-# crossterm = "0.28"
+# Phase 4 - Workflow Engine
+thiserror = "1.0"
+
+# Phase 5 - LLM Editing Loop
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+rustyline = "14.0"
+
+# Phase 6 - TUI Dashboard
+ratatui = "0.28"
+crossterm = "0.28"

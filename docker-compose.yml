@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # Manifold MCP Server
+  manifold-server:
+    build: .
+    container_name: manifold-mcp
+    volumes:
+      - manifold-data:/home/manifold/.manifold
+    stdin_open: true
+    tty: true
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped
+
+  # Optional: Manifold TUI (interactive)
+  manifold-tui:
+    build: .
+    container_name: manifold-tui
+    volumes:
+      - manifold-data:/home/manifold/.manifold
+    stdin_open: true
+    tty: true
+    command: manifold tui
+    profiles:
+      - interactive
+
+  # Optional: Export service (one-shot)
+  manifold-export:
+    build: .
+    container_name: manifold-export
+    volumes:
+      - manifold-data:/home/manifold/.manifold
+      - ./exports:/exports
+    command: manifold export all -o /exports/specs.md
+    profiles:
+      - export
+
+volumes:
+  manifold-data:
+    driver: local

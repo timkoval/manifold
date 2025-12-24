@@ -282,6 +282,70 @@ impl Database {
         }
         Ok(specs)
     }
+
+    /// Log a workflow event
+    pub fn log_workflow_event(
+        &self,
+        spec_id: &str,
+        stage: &str,
+        event: &str,
+        actor: &str,
+        timestamp: i64,
+        details: Option<&str>,
+    ) -> Result<()> {
+        self.conn
+            .execute(
+                r#"
+                INSERT INTO workflow_events (spec_id, stage, event, actor, timestamp, details)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#,
+                params![spec_id, stage, event, actor, timestamp, details],
+            )
+            .context("Failed to log workflow event")?;
+        Ok(())
+    }
+
+    /// Get workflow events for a spec
+    pub fn get_workflow_events(&self, spec_id: &str) -> Result<Vec<WorkflowEventRow>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, spec_id, stage, event, actor, timestamp, details
+            FROM workflow_events
+            WHERE spec_id = ?1
+            ORDER BY timestamp DESC
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![spec_id], |row| {
+            Ok(WorkflowEventRow {
+                id: row.get(0)?,
+                spec_id: row.get(1)?,
+                stage: row.get(2)?,
+                event: row.get(3)?,
+                actor: row.get(4)?,
+                timestamp: row.get(5)?,
+                details: row.get(6)?,
+            })
+        })?;
+
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
+    }
+}
+
+/// Database row for workflow events
+#[derive(Debug, Clone)]
+pub struct WorkflowEventRow {
+    pub id: i64,
+    pub spec_id: String,
+    pub stage: String,
+    pub event: String,
+    pub actor: String,
+    pub timestamp: i64,
+    pub details: Option<String>,
 }
 
 /// Generate a human-readable spec ID like "auric-raptor-torque"

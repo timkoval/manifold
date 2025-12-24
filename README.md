@@ -2,16 +2,19 @@
 
 A **local-first, MCP-native, JSON-canonical** specification engine that unifies all your projects into a single living manifold of requirements, scenarios, tasks, and change history.
 
-**Built from the ground up for LLM-first and agent-ready.**
+**Built from the ground up for LLM-first workflows and agent-ready automation.**
+
+[![Rust](https://img.shields.io/badge/rust-1.82%2B-orange.svg)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## Philosophy
 
 - **Specs are not files** → they are living nodes in a global manifold
-- **Canonical format = JSON** (Markdown is only a rendered view in the TUI)
+- **Canonical format = JSON** (Markdown is only a rendered view)
 - **Designed for LLM structured output** + JSON Patch from day one
-- **MCP server** so Claude, Cursor, your future brain agents can act on it
-- **Rust CLI + Ratatui TUI**
-- **SQLite backend**, embeddable, self-hostable via Docker
+- **MCP server** so Claude, Cursor, and AI agents can interact directly
+- **Rust CLI + Ratatui TUI** for performance and rich UI
+- **SQLite backend** with FTS5 search, embeddable, Docker-ready
 
 ## Why LLM-Native?
 
@@ -27,13 +30,77 @@ Traditional spec formats (Markdown, YAML) are optimized for humans. Manifold opt
 | "What should I test?" | `scenario.then` array | Extract lines starting with `- THEN` |
 | "Why was this decision made?" | `decision.rationale` | Hope there's a section for it |
 
-## Data Model (LLM-Native)
+## ✨ Features
+
+### Core Capabilities
+- ✅ **JSON-Canonical Storage** - Specs stored as structured JSON in SQLite
+- ✅ **Workflow Engine** - State machine with validation (requirements → design → tasks → approval → implemented)
+- ✅ **Full-Text Search** - FTS5-powered search across all specs
+- ✅ **Boundary Isolation** - Separate personal/work/company specs
+- ✅ **Change Tracking** - Complete history with JSON Patch operations
+
+### User Interfaces
+- ✅ **CLI Commands** - Full-featured command-line interface
+- ✅ **TUI Dashboard** - Interactive Ratatui terminal UI with tabs
+- ✅ **LLM Chat Session** - Conversational editing with AI assistance
+- ✅ **MCP Server** - JSON-RPC 2.0 server for AI agent integration
+
+### Export & Integration
+- ✅ **Markdown Export** - Beautiful documentation generation
+- ✅ **Table Formatting** - Compact overview with GitHub-flavored tables
+- ✅ **Multi-Spec Collections** - Export all specs to single document
+- ✅ **JSON Schema Validation** - Ensure spec integrity
+
+### DevOps Ready
+- ✅ **Docker Support** - Multi-stage builds for minimal images
+- ✅ **Docker Compose** - Multi-service orchestration
+- ✅ **Cross-Platform** - Linux, macOS, Windows support
+
+## 🚀 Quick Start
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/manifold.git
+cd manifold
+
+# Build the CLI
+cargo build --release
+
+# Initialize manifold
+./target/release/manifold init
+```
+
+### Basic Usage
+
+```bash
+# Create your first spec
+manifold new robot-control --name "Robot Control System"
+
+# List all specs
+manifold list
+
+# Show a spec (human-readable)
+manifold show <spec-id>
+
+# Show as JSON
+manifold show <spec-id> --json
+
+# Launch TUI dashboard
+manifold tui
+
+# Export to Markdown
+manifold export <spec-id> -o spec.md
+```
+
+## 📖 Data Model (LLM-Native)
 
 ```json
 {
   "$schema": "manifold://core/v1",
   "spec_id": "eager-anchor-auric",
-  "project": "auric-raptor",
+  "project": "robot-control",
   "boundary": "personal",
   "name": "Closed-Loop Torque Control",
   
@@ -68,7 +135,7 @@ Traditional spec formats (Markdown, YAML) are optimized for humans. Manifold opt
       "id": "task-001",
       "requirement_ids": ["req-001"],
       "title": "Implement FOC controller",
-      "description": "Implement Field-Oriented Control algorithm in Rust",
+      "description": "Implement Field-Oriented Control algorithm",
       "status": "in_progress",
       "assignee": "agent",
       "acceptance": ["unit tests pass", "benchmark shows <10ms loop time"]
@@ -95,93 +162,396 @@ Traditional spec formats (Markdown, YAML) are optimized for humans. Manifold opt
 }
 ```
 
-## Getting Started
+## 🔧 CLI Commands
 
-### Install & Initialize
-
-```bash
-# Build the CLI
-cargo build --release
-
-# Initialize manifold
-./target/release/manifold init
-
-# Create your first spec
-./target/release/manifold new auric-raptor --name "Closed-Loop Torque Control"
-
-# List specs
-./target/release/manifold list
-
-# Show a spec
-./target/release/manifold show eager-anchor-auric --json
-```
-
-## CLI Commands
-
+### Initialization & Setup
 ```bash
 manifold init                         # First-time setup
-manifold new <project> [--name "..."] [--boundary personal|work|company]
-manifold list [--boundary all] [--stage tasks]
-manifold show <id> [--json]          # JSON output or human summary
 ```
 
-## Directory Structure
+### Spec Management
+```bash
+manifold new <project> [--name "..."] [--boundary personal|work|company]
+manifold list [--boundary all] [--stage requirements]
+manifold show <id> [--json]
+manifold validate <id> [--strict]
+manifold join <source-id> <target-boundary>
+```
+
+### Workflow Operations
+```bash
+manifold workflow <id> --operation status
+manifold workflow <id> --operation advance
+manifold workflow <id> --operation history
+```
+
+### Export
+```bash
+manifold export <id> -o output.md
+manifold export <id> -o output.md --tables
+manifold export all -o collection.md
+```
+
+### Interactive Interfaces
+```bash
+manifold tui              # Launch TUI dashboard
+manifold edit <id>        # LLM chat session (requires OPENAI_API_KEY)
+manifold serve            # Start MCP server (stdio)
+```
+
+## 🎨 TUI Dashboard
+
+The Terminal UI provides a rich, interactive experience:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ ╔═══════════════════════════════════════════════════╗   │
+│ ║  Manifold Dashboard - Specification Management   ║   │
+│ ╚═══════════════════════════════════════════════════╝   │
+├──────────────┬────────────────────────────────────────────┤
+│              │                                            │
+│  Specs List  │  Detail View with Tabs                    │
+│  (30%)       │  (70%)                                     │
+│              │                                            │
+│  📋 Robot... │  [Overview][Requirements][Tasks][...]     │
+│  📐 Web...   │                                            │
+│              │  Workflow: ✓ requirements → [DESIGN] → ...│
+│              │                                            │
+├──────────────┴────────────────────────────────────────────┤
+│ ↑/↓: Navigate  Tab: Switch  1-4: Filter  q: Quit         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Features:**
+- Two-pane layout with spec list and detail view
+- 5 tabs: Overview, Requirements, Tasks, Decisions, History
+- Visual workflow progress indicators
+- Keyboard navigation (vim-style)
+- Real-time filtering by boundary
+- Color-coded UI with emojis
+
+## 🤖 MCP Server Integration
+
+Manifold includes a Model Context Protocol (MCP) server for AI agent integration:
+
+### Available Tools
+
+1. **create_spec** - Create new specifications
+2. **query_manifold** - Search and filter specs
+3. **advance_workflow** - Move specs through workflow stages
+4. **apply_patch** - Apply JSON Patch operations (RFC 6902)
+
+### Usage
+
+```bash
+# Start MCP server (stdio)
+manifold serve
+
+# Or use with Docker
+docker-compose up manifold-server
+```
+
+### Example MCP Request
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "create_spec",
+    "arguments": {
+      "project": "my-project",
+      "boundary": "personal",
+      "name": "My Specification"
+    }
+  }
+}
+```
+
+## 💬 LLM Chat Session
+
+Interactive editing with AI assistance:
+
+```bash
+export OPENAI_API_KEY=sk-...
+manifold edit <spec-id>
+
+You> Help me add a requirement for user authentication
+AI> I suggest adding: "The system SHALL authenticate users 
+    via OAuth 2.0 with multi-factor authentication support..."
+
+You> /advance
+✓ Advanced to design stage
+
+You> /status
+Current stage: design
+Requirements: 3
+...
+```
+
+**Features:**
+- Conversational interface with context-aware prompts
+- Slash commands (/status, /advance, /show, /exit)
+- Full spec context in system prompt
+- Suggestions for SHALL statements and scenarios
+- Automatic workflow validation
+
+## 📝 Markdown Export
+
+Convert JSON specs to beautiful documentation:
+
+```markdown
+# Robot Control System
+
+> **Project:** robot-control  
+> **Stage:** design  
+
+## Workflow Status
+
+```
+✓ requirements → [DESIGN] → · tasks → · approval → · implemented
+```
+
+## Requirements
+
+### req-001 - Real-time motion control
+
+**Priority:** 🔴 (must)
+
+#### Requirement
+
+> The system SHALL provide real-time motion control with <10ms latency
+
+#### Scenarios
+
+**Normal operation** (sc-001)
+
+- **GIVEN**
+  - Robot is powered on
+  - Motion controller is initialized
+- **WHEN** A motion command is issued
+- **THEN**
+  - Motion begins within 10ms
+  - Target position is reached accurately
+```
+
+**Export formats:**
+- Standard: Detailed sections with full content
+- Tables: Compact overview with GFM tables
+- Multi-spec: Collection documents with TOC
+
+## 🐳 Docker Deployment
+
+### Build & Run
+
+```bash
+# Build image
+docker build -t manifold .
+
+# Run MCP server
+docker run -it manifold
+
+# Run TUI
+docker run -it manifold manifold tui
+```
+
+### Docker Compose
+
+```bash
+# Start MCP server
+docker-compose up manifold-server
+
+# Run TUI (interactive)
+docker-compose --profile interactive up manifold-tui
+
+# Export all specs
+docker-compose --profile export up manifold-export
+```
+
+## 📂 Directory Structure
 
 ```
 ~/.manifold/
-├── config.toml                  # default boundary, LLM endpoints, MCP settings
+├── config.toml                  # Configuration
 ├── db/
 │   └── manifold.db              # SQLite with JSON1 + FTS5
 ├── schemas/
-│   ├── core.json                # JSON Schema for validation
-│   └── plugins/                 # drop-in extensions
-├── exports/                     # optional .md / .pdf renders
-└── cache/                       # embeddings, patch history
+│   └── core.json                # JSON Schema for validation
+├── exports/                     # Markdown/PDF exports
+└── cache/                       # Temporary files
 ```
 
-## Key Design Choices
+## 🎯 Workflow Engine
 
-### Borrowed from OpenSpec
+Manifold enforces a rigorous workflow with validation:
 
-- **GIVEN/WHEN/THEN** scenarios (but structured as JSON objects)
-- **Requirements vs Tasks** separation
-- **Change tracking** via JSON Patch (vs. file-based deltas)
+```
+requirements → design → tasks → approval → implemented
+```
 
-### Different from OpenSpec
+**Validation rules:**
+- `requirements → design`: Must have ≥1 requirement with SHALL statement
+- `design → tasks`: Must have ≥1 design decision
+- `tasks → approval`: Must have ≥1 task with requirement traceability
+- `approval → implemented`: Manual approval
 
-| Feature | OpenSpec | Manifold |
-|---------|----------|----------|
-| **Storage** | Markdown files in repo | SQLite database |
-| **Canonical Format** | Markdown (human-first) | JSON (LLM-first) |
-| **Scope** | Per-repository | Global across all projects |
-| **Architecture** | File-based, git-native | Database-backed, MCP native |
-| **Integration** | Slash commands in editors | MCP server for any agent |
-| **Queryable** | File search | FTS5 + SQL queries |
+**Event logging:**
+- All transitions logged to workflow_events table
+- Actor tracking (user, mcp, llm-session)
+- Timestamp and details for audit trail
 
-### LLM-Native Design Decisions
+## 🔌 Architecture
 
-| Feature | Why it's LLM-native |
-|---------|---------------------|
-| `shall` as explicit field | LLMs can directly read requirement |
-| `given`/`when`/`then` as arrays | Structured, no parsing needed |
-| `requirement_ids` on tasks | Explicit traceability |
-| `decisions` array | Design rationale inline |
-| `acceptance` on tasks | Clear completion criteria |
-| `edge_cases` on scenarios | Prompts LLM to consider failures |
-| `priority`: must/should/could | MoSCoW, machine-parseable |
-| Flat `requirements` array | Easier traversal than nested objects |
+### Technology Stack
+- **Language:** Rust 1.82+
+- **Database:** SQLite with FTS5
+- **TUI:** Ratatui + Crossterm
+- **HTTP Client:** Reqwest (for LLM API)
+- **CLI:** Clap
+- **Async:** Tokio
 
-## Implementation Phases
+### Design Principles
 
-- **Phase 1** ✅ — Skeleton + DB + CLI (`init`, `new`, `list`, `show`)
-- **Phase 2** — Schema validation & `join` command
-- **Phase 3** — MCP server (Rust)
-- **Phase 4** — Workflow engine + events table
-- **Phase 5** — LLM editing loop
-- **Phase 6** — Ratatui TUI
-- **Phase 7** — Markdown renderer & export
-- **Phase 8** — Plugin system & Docker
+1. **JSON-Canonical** - JSON is truth, Markdown is view
+2. **Local-First** - SQLite, no cloud dependencies
+3. **MCP-Native** - Built for AI agent integration
+4. **Type-Safe** - Rust's type system ensures correctness
+5. **Fast** - Compiled binary, efficient queries
 
-## License
+## 🛠️ Development Phases
 
-MIT
+- ✅ **Phase 1** - Core infrastructure, CLI, database
+- ✅ **Phase 2** - Schema validation, cross-boundary sharing
+- ✅ **Phase 3** - MCP server implementation
+- ✅ **Phase 4** - Workflow engine with state machine
+- ✅ **Phase 5** - LLM editing loop
+- ✅ **Phase 6** - Ratatui TUI dashboard
+- ✅ **Phase 7** - Markdown renderer & export
+- ✅ **Phase 8** - Docker deployment
+
+## 🧪 Testing
+
+```bash
+# Run unit tests
+cargo test
+
+# Run with demo data
+./demo_phase5.sh   # LLM editing session demo
+./demo_phase6.sh   # TUI dashboard demo
+./demo_phase7.sh   # Markdown export demo
+
+# Test MCP server
+./test_mcp.sh
+```
+
+## 🚧 Roadmap
+
+See [ENHANCEMENTS.md](ENHANCEMENTS.md) for detailed roadmap and potential improvements.
+
+## 🤝 Contributing
+
+Contributions welcome! Please see [ENHANCEMENTS.md](ENHANCEMENTS.md) for ideas.
+
+### Development Setup
+
+```bash
+# Clone and build
+git clone https://github.com/yourusername/manifold.git
+cd manifold
+cargo build
+
+# Initialize test database
+./target/debug/manifold init
+
+# Run tests
+cargo test
+
+# Run with logging
+RUST_LOG=debug cargo run -- tui
+```
+
+## ⚙️ Configuration
+
+The config file is located at `~/.manifold/config.toml`:
+
+```toml
+[database]
+path = "~/.manifold/db/manifold.db"
+
+[export]
+default_format = "standard"
+output_dir = "~/.manifold/exports"
+
+[llm]
+provider = "openai"
+api_base = "https://api.openai.com/v1"
+model = "gpt-4"
+temperature = 0.7
+
+[ui]
+theme = "default"
+```
+
+## 🔍 Search & Query
+
+```bash
+# Full-text search across all specs
+manifold list --search "authentication"
+
+# Filter by boundary
+manifold list --boundary work
+
+# Filter by stage
+manifold list --stage requirements
+
+# Combine filters
+manifold list --boundary personal --stage design
+```
+
+## 📊 Database Schema
+
+```sql
+-- Specs table with JSON1 support
+CREATE TABLE specs (
+    spec_id TEXT PRIMARY KEY,
+    project TEXT NOT NULL,
+    boundary TEXT NOT NULL,
+    data TEXT NOT NULL,  -- JSON blob
+    created_at INTEGER,
+    updated_at INTEGER
+);
+
+-- Full-text search index
+CREATE VIRTUAL TABLE specs_fts USING fts5(
+    spec_id, project, name, content
+);
+
+-- Workflow events for audit trail
+CREATE TABLE workflow_events (
+    id INTEGER PRIMARY KEY,
+    spec_id TEXT NOT NULL,
+    from_stage TEXT,
+    to_stage TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    details TEXT,
+    FOREIGN KEY (spec_id) REFERENCES specs(spec_id)
+);
+```
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details
+
+## 🙏 Acknowledgments
+
+Inspired by:
+- **OpenSpec** - For GIVEN/WHEN/THEN scenarios and requirements engineering best practices
+- **Model Context Protocol (MCP)** - For AI agent integration patterns
+- **Ratatui** - For terminal UI framework
+- The Rust community for excellent tooling
+
+---
+
+**Built with 🦀 Rust**

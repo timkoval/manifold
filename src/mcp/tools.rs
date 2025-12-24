@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use serde_json::{json, Value};
 use crate::db::Database;
 use crate::models::{SpecData, WorkflowStage, Boundary, PatchEntry};
+use crate::workflow::WorkflowEngine;
 
 /// Create a new spec
 pub async fn create_spec(db: &mut Database, args: Value) -> Result<Value> {
@@ -138,35 +139,69 @@ pub async fn advance_workflow(db: &mut Database, args: Value) -> Result<Value> {
         .ok_or_else(|| anyhow::anyhow!("Spec not found: {}", spec_id))?;
     let mut spec: SpecData = serde_json::from_value(spec_row.data)?;
 
-    // Add current stage to completed stages if not already there
-    if !spec.stages_completed.contains(&spec.stage) {
-        spec.stages_completed.push(spec.stage.clone());
+    // Validate and execute transition using workflow engine
+    match WorkflowEngine::advance_stage(&spec, target_stage) {
+        Ok(transition) => {
+            // Update spec
+            let old_stage = spec.stage.clone();
+            if !spec.stages_completed.contains(&old_stage) {
+                spec.stages_completed.push(old_stage.clone());
+            }
+            spec.stage = transition.to.clone();
+
+            // Update history
+            let now = chrono::Utc::now().timestamp();
+            spec.history.updated_at = now;
+            spec.history.patches.push(PatchEntry {
+                timestamp: now,
+                actor: "mcp".to_string(),
+                op: "advance".to_string(),
+                path: "/stage".to_string(),
+                summary: format!("Advanced from {} to {}", transition.from, transition.to),
+            });
+
+            // Log workflow event
+            db.log_workflow_event(
+                spec_id,
+                &transition.to.to_string(),
+                &transition.event.as_string(),
+                "mcp",
+                now,
+                Some(&format!("Advanced from {} to {}", transition.from, transition.to)),
+            )?;
+
+            // Update in database
+            db.update_spec(&spec)?;
+
+            Ok(json!({
+                "success": true,
+                "spec_id": spec_id,
+                "old_stage": transition.from.to_string(),
+                "new_stage": transition.to.to_string(),
+                "stages_completed": spec.stages_completed.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                "message": format!("Advanced to {} stage", transition.to)
+            }))
+        }
+        Err(e) => {
+            // Log failed validation
+            db.log_workflow_event(
+                spec_id,
+                &spec.stage.to_string(),
+                &format!("validation_failed:{}", e),
+                "mcp",
+                chrono::Utc::now().timestamp(),
+                Some(&e.to_string()),
+            )?;
+
+            Ok(json!({
+                "success": false,
+                "spec_id": spec_id,
+                "current_stage": spec.stage.to_string(),
+                "error": e.to_string(),
+                "message": format!("Cannot advance: {}", e)
+            }))
+        }
     }
-
-    let old_stage = spec.stage.clone();
-    spec.stage = target_stage.clone();
-
-    // Update history
-    let now = chrono::Utc::now().timestamp();
-    spec.history.updated_at = now;
-    spec.history.patches.push(PatchEntry {
-        timestamp: now,
-        actor: "mcp".to_string(),
-        op: "advance".to_string(),
-        path: "/stage".to_string(),
-        summary: format!("Advanced from {:?} to {:?}", old_stage, target_stage),
-    });
-
-    // Update in database
-    db.update_spec(&spec)?;
-
-    Ok(json!({
-        "success": true,
-        "spec_id": spec_id,
-        "old_stage": format!("{:?}", old_stage),
-        "new_stage": format!("{:?}", target_stage),
-        "message": format!("Advanced to {:?} stage", target_stage)
-    }))
 }
 
 /// Query/search specs in manifold

@@ -1,10 +1,10 @@
 //! Git-based sync implementation
 
-use super::{SyncConfig, SyncMetadata, SyncStatus};
+use super::SyncConfig;
 use crate::models::SpecData;
 use anyhow::{anyhow, Context, Result};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 /// Sync manager for git-based collaboration
@@ -169,6 +169,8 @@ impl SyncManager {
     }
 
     /// Get sync status
+    /// Returns list of all modified files in git porcelain format
+    #[allow(dead_code)]
     pub fn status(&self) -> Result<Vec<String>> {
         let output = Command::new("git")
             .args(&["status", "--porcelain"])
@@ -194,6 +196,7 @@ impl SyncManager {
     }
 
     /// Check if spec has local modifications
+    /// Used for showing sync status in TUI/CLI
     pub fn is_modified(&self, spec_id: &str) -> Result<bool> {
         let spec_file = format!("{}.json", spec_id);
         let output = Command::new("git")
@@ -206,6 +209,7 @@ impl SyncManager {
     }
 
     /// Get file hash (for detecting changes)
+    /// Used for sync metadata tracking
     pub fn get_file_hash(&self, spec_id: &str) -> Result<String> {
         let spec_file = format!("{}.json", spec_id);
         let output = Command::new("git")
@@ -276,6 +280,7 @@ impl SyncManager {
     }
 
     /// Get diff between local and remote
+    /// Used for displaying differences before merge
     pub fn diff(&self, spec_id: &str, remote: &str, branch: &str) -> Result<String> {
         let spec_file = format!("{}.json", spec_id);
         let output = Command::new("git")

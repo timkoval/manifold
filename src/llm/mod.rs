@@ -64,7 +64,19 @@ impl LlmSession {
     /// Create a new LLM editing session
     pub fn new(spec_id: String, paths: &ManifoldPaths) -> Result<Self> {
         let db = Database::open(paths)?;
-        let llm_config = LlmConfig::default();
+        
+        // Load config and use it for LLM settings
+        let config = crate::config::load_config()?;
+        let llm_config = LlmConfig {
+            api_url: config.llm.endpoint
+                .unwrap_or_else(|| std::env::var("OPENAI_API_BASE")
+                    .unwrap_or_else(|_| "https://api.openai.com/v1".to_string())),
+            api_key: std::env::var("OPENAI_API_KEY")
+                .unwrap_or_else(|_| "sk-dummy-key-for-testing".to_string()),
+            model: config.llm.model
+                .unwrap_or_else(|| std::env::var("OPENAI_MODEL")
+                    .unwrap_or_else(|_| "gpt-4".to_string())),
+        };
         
         // Check if API key is set (allow dummy key for testing)
         let llm_enabled = !llm_config.api_key.is_empty() 

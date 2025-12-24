@@ -5,6 +5,14 @@ edition = "2021"
 description = "A local-first, MCP-native, JSON-canonical specification engine"
 authors = ["Taras Koval"]
 
+[[bin]]
+name = "manifold"
+path = "src/main.rs"
+
+[lib]
+name = "manifold"
+path = "src/lib.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0.31", features = ["bundled", "vtab"] }
@@ -35,3 +43,6 @@ rustyline = "14.0"
 # Phase 6 - TUI Dashboard
 ratatui = "0.28"
 crossterm = "0.28"
+
+[dev-dependencies]
+tempfile = "3.8"

@@ -9,7 +9,9 @@ use std::path::Path;
 use crate::models::{SpecData, Requirement, Task, Decision, Priority, TaskStatus};
 
 /// Export format options
+/// Designed for future CLI/API export options
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum ExportFormat {
     /// Single spec to Markdown
     Markdown,

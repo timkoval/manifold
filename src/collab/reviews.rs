@@ -59,6 +59,8 @@ impl ReviewManager {
     }
 
     /// Cancel a review request
+    /// Part of review workflow API
+    #[allow(dead_code)]
     pub fn cancel(review: &mut Review, requester: &str) -> Result<()> {
         if review.status != ReviewStatus::Pending {
             return Err(anyhow!("Review is not in pending state"));
@@ -110,11 +112,15 @@ impl ReviewManager {
     }
 
     /// Check if spec has pending reviews
+    /// Utility for workflow validation
+    #[allow(dead_code)]
     pub fn has_pending_reviews(reviews: &[Review]) -> bool {
         reviews.iter().any(|r| r.status == ReviewStatus::Pending)
     }
 
     /// Check if spec is approved
+    /// Utility for workflow validation
+    #[allow(dead_code)]
     pub fn is_approved(reviews: &[Review]) -> bool {
         !reviews.is_empty() && reviews.iter().all(|r| r.status == ReviewStatus::Approved)
     }

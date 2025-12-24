@@ -256,16 +256,22 @@ impl SpecData {
     }
     
     /// Get the current workflow stage
+    /// Utility method for external consumers of the library
+    #[allow(dead_code)]
     pub fn current_stage(&self) -> &WorkflowStage {
         &self.stage
     }
     
     /// Get requirement by ID
+    /// Utility method for external consumers of the library
+    #[allow(dead_code)]
     pub fn get_requirement(&self, id: &str) -> Option<&Requirement> {
         self.requirements.iter().find(|r| r.id == id)
     }
     
     /// Get task by ID
+    /// Utility method for external consumers of the library
+    #[allow(dead_code)]
     pub fn get_task(&self, id: &str) -> Option<&Task> {
         self.tasks.iter().find(|t| t.id == id)
     }

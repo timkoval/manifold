@@ -321,7 +321,9 @@ impl Database {
         Ok(specs)
     }
 
-    /// Search specs using FTS5
+    /// Search specs using FTS5 (full-text search)
+    /// This is designed for future CLI/TUI search features
+    /// Full-text search across spec data using FTS5
     pub fn search_specs(&self, query: &str) -> Result<Vec<SpecRow>> {
         let mut stmt = self.conn.prepare(
             r#"
@@ -408,7 +410,8 @@ impl Database {
 
     // Collaboration methods
 
-    /// Save sync metadata
+    /// Save sync metadata for git-based collaboration
+    /// Used by sync push/pull to track sync state
     pub fn save_sync_metadata(&self, metadata: &SyncMetadata) -> Result<()> {
         self.conn
             .execute(
@@ -430,6 +433,7 @@ impl Database {
     }
 
     /// Get sync metadata for a spec
+    /// Used by sync status to show last sync info
     pub fn get_sync_metadata(&self, spec_id: &str) -> Result<Option<SyncMetadata>> {
         let mut stmt = self.conn.prepare(
             "SELECT spec_id, last_sync_timestamp, last_sync_hash, remote_branch, sync_status FROM sync_metadata WHERE spec_id = ?1",
@@ -593,6 +597,7 @@ impl Database {
 
 /// Database row for workflow events
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct WorkflowEventRow {
     pub id: i64,
     pub spec_id: String,

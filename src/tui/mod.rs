@@ -12,7 +12,6 @@ use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
     Frame, Terminal,
 };
@@ -64,7 +63,7 @@ impl TuiApp {
             list_state.select(Some(0));
         }
 
-        let mut conflict_list_state = ListState::default();
+        let conflict_list_state = ListState::default();
 
         Ok(Self {
             db,
@@ -251,7 +250,7 @@ impl TuiApp {
                 Constraint::Min(0),      // Content
                 Constraint::Length(3),  // Footer
             ])
-            .split(f.size());
+            .split(f.area());
 
         // Header
         self.render_header(f, chunks[0]);
@@ -747,7 +746,7 @@ impl TuiApp {
 
     /// Render resolution popup
     fn render_resolution_popup(&self, f: &mut Frame) {
-        let area = centered_rect(60, 40, f.size());
+        let area = centered_rect(60, 40, f.area());
 
         // Clear background
         let clear = Block::default()
@@ -794,7 +793,7 @@ impl TuiApp {
 
     /// Render status message
     fn render_status_message(&self, f: &mut Frame, message: &str) {
-        let area = centered_rect(50, 20, f.size());
+        let area = centered_rect(50, 20, f.area());
         
         let paragraph = Paragraph::new(message)
             .block(Block::default().borders(Borders::ALL).title("Status"))
@@ -881,7 +880,7 @@ impl TuiApp {
 
     /// Render bulk resolution popup
     fn render_bulk_popup(&self, f: &mut Frame) {
-        let area = centered_rect(60, 40, f.size());
+        let area = centered_rect(60, 40, f.area());
 
         // Clear background
         let clear = Block::default()
@@ -933,7 +932,7 @@ impl TuiApp {
 
     /// Render manual edit popup
     fn render_manual_edit_popup(&self, f: &mut Frame) {
-        let area = centered_rect(70, 50, f.size());
+        let area = centered_rect(70, 50, f.area());
 
         // Clear background
         let clear = Block::default()

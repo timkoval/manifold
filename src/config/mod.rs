@@ -118,6 +118,7 @@ impl ManifoldPaths {
 }
 
 /// Load configuration from disk
+/// Used for default boundary, LLM settings, and MCP server config
 pub fn load_config() -> Result<Config> {
     let paths = ManifoldPaths::new()?;
     if !paths.config.exists() {

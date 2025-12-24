@@ -54,6 +54,16 @@ enum Commands {
         stage: Option<String>,
     },
 
+    /// Search specs using full-text search
+    Search {
+        /// Search query
+        query: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Show a spec by ID
     Show {
         /// Spec ID
@@ -130,24 +140,25 @@ enum Commands {
     /// Git-based sync operations
     Sync {
         #[command(subcommand)]
-        operation: SyncOperation,
+        operation: SyncOperationCli,
     },
 
     /// Review and approval operations
     Review {
         #[command(subcommand)]
-        operation: ReviewOperation,
+        operation: ReviewOperationCli,
     },
 
     /// Conflict resolution operations
     Conflicts {
         #[command(subcommand)]
-        operation: ConflictOperation,
+        operation: ConflictOperationCli,
     },
 }
 
+// Clap-compatible wrapper enums for CLI parsing
 #[derive(Subcommand)]
-enum SyncOperation {
+enum SyncOperationCli {
     /// Initialize sync repository
     Init {
         /// Path to git repository
@@ -193,10 +204,24 @@ enum SyncOperation {
 
     /// Show sync status
     Status,
+
+    /// Show differences between local and remote
+    Diff {
+        /// Spec ID
+        id: String,
+
+        /// Remote name
+        #[arg(long, default_value = "origin")]
+        remote: String,
+
+        /// Branch name
+        #[arg(long, default_value = "main")]
+        branch: String,
+    },
 }
 
 #[derive(Subcommand)]
-enum ReviewOperation {
+enum ReviewOperationCli {
     /// Request a review
     Request {
         /// Spec ID
@@ -238,7 +263,7 @@ enum ReviewOperation {
 }
 
 #[derive(Subcommand)]
-enum ConflictOperation {
+enum ConflictOperationCli {
     /// List conflicts
     List {
         /// Spec ID (optional)
@@ -254,6 +279,39 @@ enum ConflictOperation {
         #[arg(short, long, default_value = "manual")]
         strategy: String,
     },
+}
+
+// Conversion functions from CLI enums to library enums
+impl From<SyncOperationCli> for commands::SyncOperation {
+    fn from(op: SyncOperationCli) -> Self {
+        match op {
+            SyncOperationCli::Init { repo, remote } => commands::SyncOperation::Init { repo, remote },
+            SyncOperationCli::Push { id, message, remote, branch } => commands::SyncOperation::Push { id, message, remote, branch },
+            SyncOperationCli::Pull { id, remote, branch } => commands::SyncOperation::Pull { id, remote, branch },
+            SyncOperationCli::Status => commands::SyncOperation::Status,
+            SyncOperationCli::Diff { id, remote, branch } => commands::SyncOperation::Diff { id, remote, branch },
+        }
+    }
+}
+
+impl From<ReviewOperationCli> for commands::ReviewOperation {
+    fn from(op: ReviewOperationCli) -> Self {
+        match op {
+            ReviewOperationCli::Request { spec_id, reviewer } => commands::ReviewOperation::Request { spec_id, reviewer },
+            ReviewOperationCli::Approve { review_id, comment } => commands::ReviewOperation::Approve { review_id, comment },
+            ReviewOperationCli::Reject { review_id, comment } => commands::ReviewOperation::Reject { review_id, comment },
+            ReviewOperationCli::List { spec_id, status } => commands::ReviewOperation::List { spec_id, status },
+        }
+    }
+}
+
+impl From<ConflictOperationCli> for commands::ConflictOperation {
+    fn from(op: ConflictOperationCli) -> Self {
+        match op {
+            ConflictOperationCli::List { spec_id } => commands::ConflictOperation::List { spec_id },
+            ConflictOperationCli::Resolve { conflict_id, strategy } => commands::ConflictOperation::Resolve { conflict_id, strategy },
+        }
+    }
 }
 
 #[tokio::main]
@@ -273,6 +331,14 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::List { boundary, stage } => {
             commands::list(Some(&boundary), stage.as_deref())?;
+        }
+        Commands::Search { query, json } => {
+            let format = if json {
+                commands::OutputFormat::Json
+            } else {
+                commands::OutputFormat::Summary
+            };
+            commands::search(&query, format)?;
         }
         Commands::Show { id, json } => {
             let format = if json {
@@ -347,13 +413,13 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Sync { operation } => {
-            commands::sync_command(operation).await?;
+            commands::sync_command(operation.into()).await?;
         }
         Commands::Review { operation } => {
-            commands::review_command(operation)?;
+            commands::review_command(operation.into())?;
         }
         Commands::Conflicts { operation } => {
-            commands::conflict_command(operation)?;
+            commands::conflict_command(operation.into())?;
         }
     }
 

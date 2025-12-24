@@ -11,6 +11,102 @@ use crate::db::Database;
 use crate::models::{Boundary, SpecData, WorkflowStage};
 use crate::workflow::{WorkflowEngine, WorkflowError};
 
+// Operation enums for CLI subcommands
+// These are defined here (not in main.rs) so they're available in both library and binary contexts
+
+/// Git sync operations
+#[derive(Debug, Clone)]
+pub enum SyncOperation {
+    /// Initialize sync repository
+    Init {
+        /// Path to git repository
+        repo: String,
+        /// Remote URL (optional)
+        remote: Option<String>,
+    },
+    /// Push spec(s) to git repository
+    Push {
+        /// Spec ID (or 'all' for all specs)
+        id: String,
+        /// Commit message
+        message: Option<String>,
+        /// Remote name
+        remote: String,
+        /// Branch name
+        branch: String,
+    },
+    /// Pull spec(s) from git repository
+    Pull {
+        /// Spec ID (or 'all' for all specs)
+        id: String,
+        /// Remote name
+        remote: String,
+        /// Branch name
+        branch: String,
+    },
+    /// Show sync status
+    Status,
+    /// Show differences between local and remote
+    Diff {
+        /// Spec ID
+        id: String,
+        /// Remote name
+        remote: String,
+        /// Branch name
+        branch: String,
+    },
+}
+
+/// Review operations
+#[derive(Debug, Clone)]
+pub enum ReviewOperation {
+    /// Request a review
+    Request {
+        /// Spec ID
+        spec_id: String,
+        /// Reviewer email or username
+        reviewer: String,
+    },
+    /// Approve a review
+    Approve {
+        /// Review ID
+        review_id: String,
+        /// Optional comment
+        comment: Option<String>,
+    },
+    /// Reject a review
+    Reject {
+        /// Review ID
+        review_id: String,
+        /// Required rejection comment
+        comment: String,
+    },
+    /// List reviews
+    List {
+        /// Spec ID (optional)
+        spec_id: Option<String>,
+        /// Filter by status
+        status: Option<String>,
+    },
+}
+
+/// Conflict resolution operations
+#[derive(Debug, Clone)]
+pub enum ConflictOperation {
+    /// List conflicts
+    List {
+        /// Spec ID (optional)
+        spec_id: Option<String>,
+    },
+    /// Resolve a conflict
+    Resolve {
+        /// Conflict ID
+        conflict_id: String,
+        /// Resolution strategy: ours, theirs, manual
+        strategy: String,
+    },
+}
+
 /// Initialize manifold for first-time setup
 pub fn init() -> Result<()> {
     let paths = ManifoldPaths::new()?;
@@ -57,7 +153,15 @@ pub fn new_spec(project_id: &str, name: Option<&str>, boundary: Option<&str>) ->
 
     let boundary = match boundary {
         Some(b) => b.parse::<Boundary>().map_err(|e| anyhow::anyhow!(e))?,
-        std::option::Option::None => Boundary::Personal,
+        None => {
+            // Load default boundary from config
+            let config = crate::config::load_config()?;
+            match config.default_boundary {
+                crate::config::DefaultBoundary::Personal => Boundary::Personal,
+                crate::config::DefaultBoundary::Work => Boundary::Work,
+                crate::config::DefaultBoundary::Company => Boundary::Company,
+            }
+        }
     };
 
     let spec_name = name.unwrap_or(project_id).to_string();
@@ -121,6 +225,56 @@ pub fn list(boundary: Option<&str>, stage: Option<&str>) -> Result<()> {
             spec.boundary,
             spec.stage
         );
+    }
+
+    Ok(())
+}
+
+/// Search specs using full-text search
+pub fn search(query: &str, format: OutputFormat) -> Result<()> {
+    let paths = ManifoldPaths::new()?;
+    ensure_initialized(&paths)?;
+
+    let db = Database::open(&paths)?;
+    let specs = db.search_specs(query)?;
+
+    match format {
+        OutputFormat::Json => {
+            let json_specs: Vec<_> = specs.iter().map(|s| &s.data).collect();
+            let json = serde_json::to_string_pretty(&json_specs)?;
+            println!("{}", json);
+        }
+        OutputFormat::Summary => {
+            if specs.is_empty() {
+                println!("No specs found matching: {}", query);
+                return Ok(());
+            }
+
+            println!("Search results for: {}", query);
+            println!("{}", "=".repeat(60));
+            println!("Found {} spec(s)", specs.len());
+            println!();
+            println!(
+                "{:<30} {:<20} {:<12} {:<15}",
+                "ID", "PROJECT", "BOUNDARY", "STAGE"
+            );
+            println!("{}", "-".repeat(77));
+
+            for spec in specs {
+                let name = spec
+                    .data
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&spec.project);
+                println!(
+                    "{:<30} {:<20} {:<12} {:<15}",
+                    truncate(&spec.id, 28),
+                    truncate(name, 18),
+                    spec.boundary,
+                    spec.stage
+                );
+            }
+        }
     }
 
     Ok(())
@@ -503,8 +657,7 @@ pub enum WorkflowOperation {
 // Collaboration commands
 
 /// Sync command handler
-pub async fn sync_command(operation: crate::SyncOperation) -> Result<()> {
-    use crate::SyncOperation;
+pub async fn sync_command(operation: SyncOperation) -> Result<()> {
     
     let paths = ManifoldPaths::new()?;
     ensure_initialized(&paths)?;
@@ -552,7 +705,6 @@ pub async fn sync_command(operation: crate::SyncOperation) -> Result<()> {
                 }
 
                 let commit_msg = message.unwrap_or_else(|| format!("Update {} specs", pushed_count));
-                let files: Vec<_> = (0..pushed_count).map(|_| std::path::PathBuf::new()).collect();
                 
                 if let Ok(hash) = manager.commit(&commit_msg, &[]) {
                     if hash != "no-changes" {
@@ -573,6 +725,17 @@ pub async fn sync_command(operation: crate::SyncOperation) -> Result<()> {
                 let hash = manager.commit(&commit_msg, &[file_path])?;
                 if hash != "no-changes" {
                     manager.push(&remote, &branch)?;
+                    
+                    // Save sync metadata
+                    let metadata = crate::collab::SyncMetadata {
+                        spec_id: id.clone(),
+                        last_sync_timestamp: chrono::Utc::now().timestamp(),
+                        last_sync_hash: hash.clone(),
+                        remote_branch: Some(branch.clone()),
+                        sync_status: crate::collab::SyncStatus::Synced,
+                    };
+                    db.save_sync_metadata(&metadata)?;
+                    
                     println!("✓ Pushed spec {} (commit: {})", id, &hash[..8]);
                 } else {
                     println!("✓ No changes to push");
@@ -607,16 +770,40 @@ pub async fn sync_command(operation: crate::SyncOperation) -> Result<()> {
                                     None,
                                 )?;
 
-                                if !conflicts.is_empty() {
-                                    println!("⚠ Conflict detected in spec: {}", spec_id);
-                                    for conflict in &conflicts {
-                                        db.save_conflict(conflict)?;
-                                    }
-                                    println!("  Run 'manifold conflicts list' to review");
-                                } else {
-                                    db.update_spec(&remote_spec)?;
-                                    pulled_count += 1;
-                                }
+                                 if !conflicts.is_empty() {
+                                     println!("⚠ Conflict detected in spec: {}", spec_id);
+                                     for conflict in &conflicts {
+                                         db.save_conflict(conflict)?;
+                                     }
+                                     println!("  Run 'manifold conflicts list' to review");
+                                     
+                                     // Save metadata with conflicted status
+                                     if let Ok(hash) = manager.get_file_hash(&spec_id) {
+                                         let metadata = crate::collab::SyncMetadata {
+                                             spec_id: spec_id.clone(),
+                                             last_sync_timestamp: chrono::Utc::now().timestamp(),
+                                             last_sync_hash: hash,
+                                             remote_branch: Some(branch.clone()),
+                                             sync_status: crate::collab::SyncStatus::Conflicted,
+                                         };
+                                         let _ = db.save_sync_metadata(&metadata);
+                                     }
+                                 } else {
+                                     db.update_spec(&remote_spec)?;
+                                     pulled_count += 1;
+                                     
+                                     // Save metadata with synced status
+                                     if let Ok(hash) = manager.get_file_hash(&spec_id) {
+                                         let metadata = crate::collab::SyncMetadata {
+                                             spec_id: spec_id.clone(),
+                                             last_sync_timestamp: chrono::Utc::now().timestamp(),
+                                             last_sync_hash: hash,
+                                             remote_branch: Some(branch.clone()),
+                                             sync_status: crate::collab::SyncStatus::Synced,
+                                         };
+                                         let _ = db.save_sync_metadata(&metadata);
+                                     }
+                                 }
                             } else {
                                 db.insert_spec(&remote_spec)?;
                                 pulled_count += 1;
@@ -650,13 +837,49 @@ pub async fn sync_command(operation: crate::SyncOperation) -> Result<()> {
                         }
                         println!();
                         println!("Run 'manifold conflicts resolve <conflict-id>' to resolve");
+                        
+                        // Save metadata with conflicted status
+                        if let Ok(hash) = manager.get_file_hash(&id) {
+                            let metadata = crate::collab::SyncMetadata {
+                                spec_id: id.clone(),
+                                last_sync_timestamp: chrono::Utc::now().timestamp(),
+                                last_sync_hash: hash,
+                                remote_branch: Some(branch.clone()),
+                                sync_status: crate::collab::SyncStatus::Conflicted,
+                            };
+                            let _ = db.save_sync_metadata(&metadata);
+                        }
                     } else {
                         db.update_spec(&remote_spec)?;
                         println!("✓ Pulled spec: {}", id);
+                        
+                        // Save metadata with synced status
+                        if let Ok(hash) = manager.get_file_hash(&id) {
+                            let metadata = crate::collab::SyncMetadata {
+                                spec_id: id.clone(),
+                                last_sync_timestamp: chrono::Utc::now().timestamp(),
+                                last_sync_hash: hash,
+                                remote_branch: Some(branch.clone()),
+                                sync_status: crate::collab::SyncStatus::Synced,
+                            };
+                            let _ = db.save_sync_metadata(&metadata);
+                        }
                     }
                 } else {
                     db.insert_spec(&remote_spec)?;
                     println!("✓ Pulled new spec: {}", id);
+                    
+                    // Save metadata for new spec
+                    if let Ok(hash) = manager.get_file_hash(&id) {
+                        let metadata = crate::collab::SyncMetadata {
+                            spec_id: id.clone(),
+                            last_sync_timestamp: chrono::Utc::now().timestamp(),
+                            last_sync_hash: hash,
+                            remote_branch: Some(branch.clone()),
+                            sync_status: crate::collab::SyncStatus::Synced,
+                        };
+                        let _ = db.save_sync_metadata(&metadata);
+                    }
                 }
             }
         }
@@ -665,18 +888,110 @@ pub async fn sync_command(operation: crate::SyncOperation) -> Result<()> {
             let sync_dir = paths.root.join("sync");
             let config = SyncConfig::new(sync_dir);
             let manager = SyncManager::new(config);
+            let db = Database::open(&paths)?;
 
             println!("Sync status:");
             println!("{}", "=".repeat(60));
 
-            let modified_files = manager.status()?;
+            // Get all specs
+            let specs = db.list_specs(None, None)?;
             
-            if modified_files.is_empty() {
-                println!("✓ No local modifications");
-            } else {
-                println!("Modified specs:");
-                for file in modified_files {
-                    println!("  {}", file);
+            if specs.is_empty() {
+                println!("No specs to sync");
+                return Ok(());
+            }
+
+            let mut modified_count = 0;
+            let mut synced_count = 0;
+            
+            for spec_row in specs {
+                let spec_id = &spec_row.id;
+                
+                // Check sync metadata first
+                if let Ok(Some(metadata)) = db.get_sync_metadata(spec_id) {
+                    let status_icon = match metadata.sync_status {
+                        crate::collab::SyncStatus::Synced => "✓",
+                        crate::collab::SyncStatus::Modified => "⚠",
+                        crate::collab::SyncStatus::Conflicted => "✗",
+                        crate::collab::SyncStatus::Unsynced => "?",
+                    };
+                    
+                    println!("  {} {} - {}", status_icon, spec_id, metadata.sync_status);
+                    
+                    // Show additional info
+                    let last_sync = chrono::DateTime::from_timestamp(metadata.last_sync_timestamp, 0)
+                        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    println!("    Last sync: {} ({})", last_sync, &metadata.last_sync_hash[..8]);
+                    if let Some(branch) = &metadata.remote_branch {
+                        println!("    Branch: {}", branch);
+                    }
+                    
+                    match metadata.sync_status {
+                        crate::collab::SyncStatus::Synced => synced_count += 1,
+                        crate::collab::SyncStatus::Modified => modified_count += 1,
+                        _ => {}
+                    }
+                } else {
+                    // Fall back to git status check
+                    match manager.is_modified(spec_id) {
+                        Ok(true) => {
+                            println!("  ⚠ {} - MODIFIED", spec_id);
+                            
+                            // Show file hash for tracking
+                            if let Ok(hash) = manager.get_file_hash(spec_id) {
+                                println!("    Hash: {}", &hash[..8]);
+                            }
+                            
+                            modified_count += 1;
+                        }
+                        Ok(false) => {
+                            println!("  ✓ {} - synced", spec_id);
+                            synced_count += 1;
+                        }
+                        Err(_) => {
+                            println!("  ? {} - not tracked", spec_id);
+                        }
+                    }
+                }
+            }
+            
+            println!();
+            println!("Summary: {} synced, {} modified", synced_count, modified_count);
+        }
+
+        SyncOperation::Diff { id, remote, branch } => {
+            let sync_dir = paths.root.join("sync");
+            let config = SyncConfig::new(sync_dir);
+            let repo_path = config.repo_path.clone();
+            let manager = SyncManager::new(config);
+
+            println!("Diff for spec: {}", id);
+            println!("{}", "=".repeat(60));
+
+            // Fetch from remote first to ensure we have latest
+            let output = std::process::Command::new("git")
+                .args(&["fetch", &remote])
+                .current_dir(&repo_path)
+                .output()
+                .context("Failed to fetch from remote")?;
+
+            if !output.status.success() {
+                eprintln!("⚠ Failed to fetch from remote: {}", String::from_utf8_lossy(&output.stderr));
+            }
+
+            // Get diff
+            match manager.diff(&id, &remote, &branch) {
+                Ok(diff) => {
+                    if diff.is_empty() {
+                        println!("No differences found - spec is in sync");
+                    } else {
+                        println!("{}", diff);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("⚠ Failed to get diff: {}", e);
+                    eprintln!("Note: Make sure the spec exists both locally and on remote");
                 }
             }
         }
@@ -686,8 +1001,7 @@ pub async fn sync_command(operation: crate::SyncOperation) -> Result<()> {
 }
 
 /// Review command handler
-pub fn review_command(operation: crate::ReviewOperation) -> Result<()> {
-    use crate::ReviewOperation;
+pub fn review_command(operation: ReviewOperation) -> Result<()> {
     
     let paths = ManifoldPaths::new()?;
     ensure_initialized(&paths)?;
@@ -769,8 +1083,7 @@ pub fn review_command(operation: crate::ReviewOperation) -> Result<()> {
 }
 
 /// Conflict command handler
-pub fn conflict_command(operation: crate::ConflictOperation) -> Result<()> {
-    use crate::ConflictOperation;
+pub fn conflict_command(operation: ConflictOperation) -> Result<()> {
     
     let paths = ManifoldPaths::new()?;
     ensure_initialized(&paths)?;

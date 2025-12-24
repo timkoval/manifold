@@ -33,6 +33,7 @@ impl SyncConfig {
 }
 
 /// Sync metadata tracked per spec
+/// Persisted in database after push/pull operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncMetadata {
     pub spec_id: String,
@@ -42,6 +43,8 @@ pub struct SyncMetadata {
     pub sync_status: SyncStatus,
 }
 
+/// Sync status for specs
+/// Tracks whether spec is synced, modified, conflicted, or unsynced
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SyncStatus {

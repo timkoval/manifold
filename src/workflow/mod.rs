@@ -12,7 +12,9 @@ use crate::models::{SpecData, WorkflowStage};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Workflow event types
+/// Core types for workflow event tracking in database
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum WorkflowEvent {
     /// Stage transition (from, to)
     Transition(WorkflowStage, WorkflowStage),
@@ -226,6 +228,8 @@ pub struct WorkflowTransition {
 
 impl WorkflowTransition {
     /// Get the current timestamp
+    /// Utility for creating workflow events
+    #[allow(dead_code)]
     pub fn timestamp() -> i64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -237,7 +241,7 @@ impl WorkflowTransition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Boundary, Decision, Requirement, Task, TaskStatus, Priority, History};
+    use crate::models::{Boundary, Priority, Requirement};
     
     fn create_test_spec(stage: WorkflowStage) -> SpecData {
         let mut spec = SpecData::new(

@@ -8,11 +8,7 @@ pub struct ReviewManager;
 
 impl ReviewManager {
     /// Create a new review request
-    pub fn create_review(
-        spec_id: String,
-        requester: String,
-        reviewer: String,
-    ) -> Review {
+    pub fn create_review(spec_id: String, requester: String, reviewer: String) -> Review {
         let now = chrono::Utc::now().timestamp();
         Review {
             id: uuid::Uuid::new_v4().to_string(),
@@ -128,7 +124,7 @@ impl ReviewManager {
     /// Get review statistics
     pub fn get_stats(reviews: &[Review]) -> ReviewStats {
         let mut stats = ReviewStats::default();
-        
+
         for review in reviews {
             match review.status {
                 ReviewStatus::Pending => stats.pending += 1,

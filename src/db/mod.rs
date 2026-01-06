@@ -17,9 +17,17 @@ pub struct Database {
 impl Database {
     /// Open an existing database
     pub fn open(paths: &ManifoldPaths) -> Result<Self> {
-        let conn =
-            Connection::open(&paths.db_file).context("Failed to open manifold database")?;
+        let conn = Connection::open(&paths.db_file).context("Failed to open manifold database")?;
         Ok(Self { conn })
+    }
+
+    /// Invalidate cached reads to see changes from other processes (e.g., MCP server)
+    /// This should be called before reading data that may have been modified externally
+    pub fn invalidate_cache(&self) -> Result<()> {
+        // Execute a write statement to force SQLite to release any cached read locks
+        // and see the latest committed data from other connections
+        self.conn.execute_batch("BEGIN IMMEDIATE; COMMIT;")?;
+        Ok(())
     }
 
     /// Initialize a new database with schema
@@ -172,8 +180,7 @@ impl Database {
     /// Insert a new spec
     pub fn insert_spec(&self, spec: &SpecData) -> Result<String> {
         let id = spec.spec_id.clone();
-        let data_json =
-            serde_json::to_string(spec).context("Failed to serialize spec")?;
+        let data_json = serde_json::to_string(spec).context("Failed to serialize spec")?;
 
         self.conn
             .execute(
@@ -230,10 +237,7 @@ impl Database {
 
         // Update FTS index
         self.conn
-            .execute(
-                "DELETE FROM specs_fts WHERE id = ?1",
-                params![id],
-            )
+            .execute("DELETE FROM specs_fts WHERE id = ?1", params![id])
             .context("Failed to delete from FTS")?;
 
         let content = extract_searchable_content(spec);
@@ -298,8 +302,9 @@ impl Database {
         query.push_str(" ORDER BY updated_at DESC");
 
         let mut stmt = self.conn.prepare(&query)?;
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-        
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
         let rows = stmt.query_map(params_refs.as_slice(), |row| {
             let data_str: String = row.get(3)?;
             let data: serde_json::Value = serde_json::from_str(&data_str).unwrap_or_default();
@@ -445,7 +450,10 @@ impl Database {
                 last_sync_timestamp: row.get(1)?,
                 last_sync_hash: row.get(2)?,
                 remote_branch: row.get(3)?,
-                sync_status: row.get::<_, String>(4)?.parse().unwrap_or(SyncStatus::Unsynced),
+                sync_status: row
+                    .get::<_, String>(4)?
+                    .parse()
+                    .unwrap_or(SyncStatus::Unsynced),
             })
         });
 
@@ -496,7 +504,10 @@ impl Database {
                 remote_value: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_default(),
                 base_value: base_value_str.and_then(|s| serde_json::from_str(&s).ok()),
                 detected_at: row.get(6)?,
-                status: row.get::<_, String>(7)?.parse().unwrap_or(ConflictStatus::Unresolved),
+                status: row
+                    .get::<_, String>(7)?
+                    .parse()
+                    .unwrap_or(ConflictStatus::Unresolved),
             })
         })?;
 
@@ -554,7 +565,10 @@ impl Database {
                 spec_id: row.get(1)?,
                 requester: row.get(2)?,
                 reviewer: row.get(3)?,
-                status: row.get::<_, String>(4)?.parse().unwrap_or(ReviewStatus::Pending),
+                status: row
+                    .get::<_, String>(4)?
+                    .parse()
+                    .unwrap_or(ReviewStatus::Pending),
                 comment: row.get(5)?,
                 requested_at: row.get(6)?,
                 reviewed_at: row.get(7)?,
@@ -580,7 +594,10 @@ impl Database {
                 spec_id: row.get(1)?,
                 requester: row.get(2)?,
                 reviewer: row.get(3)?,
-                status: row.get::<_, String>(4)?.parse().unwrap_or(ReviewStatus::Pending),
+                status: row
+                    .get::<_, String>(4)?
+                    .parse()
+                    .unwrap_or(ReviewStatus::Pending),
                 comment: row.get(5)?,
                 requested_at: row.get(6)?,
                 reviewed_at: row.get(7)?,
@@ -610,15 +627,19 @@ pub struct WorkflowEventRow {
 
 /// Generate a human-readable spec ID like "auric-raptor-torque"
 pub fn generate_spec_id(project: &str) -> String {
-    let adjectives = ["amber", "azure", "bold", "calm", "dark", "eager", "fair", "gold", "hazy", "keen"];
-    let nouns = ["anchor", "beacon", "cipher", "delta", "echo", "flux", "grid", "helix", "iris", "jade"];
-    
+    let adjectives = [
+        "amber", "azure", "bold", "calm", "dark", "eager", "fair", "gold", "hazy", "keen",
+    ];
+    let nouns = [
+        "anchor", "beacon", "cipher", "delta", "echo", "flux", "grid", "helix", "iris", "jade",
+    ];
+
     let uuid = uuid::Uuid::new_v4();
     let bytes = uuid.as_bytes();
-    
+
     let adj = adjectives[(bytes[0] as usize) % adjectives.len()];
     let noun = nouns[(bytes[1] as usize) % nouns.len()];
-    
+
     // Take first word from project or use a hash
     let suffix = project
         .split('-')
@@ -627,7 +648,7 @@ pub fn generate_spec_id(project: &str) -> String {
         .chars()
         .take(8)
         .collect::<String>();
-    
+
     format!("{}-{}-{}", adj, noun, suffix)
 }
 
@@ -635,7 +656,7 @@ pub fn generate_spec_id(project: &str) -> String {
 fn extract_searchable_content(spec: &SpecData) -> String {
     let mut content = Vec::new();
     content.push(spec.name.clone());
-    
+
     for req in &spec.requirements {
         content.push(req.title.clone());
         content.push(req.shall.clone());
@@ -650,17 +671,17 @@ fn extract_searchable_content(spec: &SpecData) -> String {
             content.extend(scenario.then.clone());
         }
     }
-    
+
     for task in &spec.tasks {
         content.push(task.title.clone());
         content.push(task.description.clone());
     }
-    
+
     for decision in &spec.decisions {
         content.push(decision.title.clone());
         content.push(decision.context.clone());
         content.push(decision.decision.clone());
     }
-    
+
     content.join(" ")
 }

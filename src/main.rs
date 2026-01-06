@@ -2,23 +2,27 @@
 //!
 //! A local-first, MCP-native, JSON-canonical specification engine
 
+mod collab;
 mod commands;
 mod config;
 mod db;
-mod models;
-mod validation;
-mod mcp;
-mod workflow;
-mod llm;
-mod tui;
 mod export;
-mod collab;
+mod llm;
+mod mcp;
+mod models;
+mod tui;
+mod validation;
+mod workflow;
 
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "manifold")]
-#[command(author, version, about = "The Global Spec Manifold - A local-first, MCP-native specification engine")]
+#[command(
+    author,
+    version,
+    about = "The Global Spec Manifold - A local-first, MCP-native specification engine"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -285,11 +289,27 @@ enum ConflictOperationCli {
 impl From<SyncOperationCli> for commands::SyncOperation {
     fn from(op: SyncOperationCli) -> Self {
         match op {
-            SyncOperationCli::Init { repo, remote } => commands::SyncOperation::Init { repo, remote },
-            SyncOperationCli::Push { id, message, remote, branch } => commands::SyncOperation::Push { id, message, remote, branch },
-            SyncOperationCli::Pull { id, remote, branch } => commands::SyncOperation::Pull { id, remote, branch },
+            SyncOperationCli::Init { repo, remote } => {
+                commands::SyncOperation::Init { repo, remote }
+            }
+            SyncOperationCli::Push {
+                id,
+                message,
+                remote,
+                branch,
+            } => commands::SyncOperation::Push {
+                id,
+                message,
+                remote,
+                branch,
+            },
+            SyncOperationCli::Pull { id, remote, branch } => {
+                commands::SyncOperation::Pull { id, remote, branch }
+            }
             SyncOperationCli::Status => commands::SyncOperation::Status,
-            SyncOperationCli::Diff { id, remote, branch } => commands::SyncOperation::Diff { id, remote, branch },
+            SyncOperationCli::Diff { id, remote, branch } => {
+                commands::SyncOperation::Diff { id, remote, branch }
+            }
         }
     }
 }
@@ -297,10 +317,18 @@ impl From<SyncOperationCli> for commands::SyncOperation {
 impl From<ReviewOperationCli> for commands::ReviewOperation {
     fn from(op: ReviewOperationCli) -> Self {
         match op {
-            ReviewOperationCli::Request { spec_id, reviewer } => commands::ReviewOperation::Request { spec_id, reviewer },
-            ReviewOperationCli::Approve { review_id, comment } => commands::ReviewOperation::Approve { review_id, comment },
-            ReviewOperationCli::Reject { review_id, comment } => commands::ReviewOperation::Reject { review_id, comment },
-            ReviewOperationCli::List { spec_id, status } => commands::ReviewOperation::List { spec_id, status },
+            ReviewOperationCli::Request { spec_id, reviewer } => {
+                commands::ReviewOperation::Request { spec_id, reviewer }
+            }
+            ReviewOperationCli::Approve { review_id, comment } => {
+                commands::ReviewOperation::Approve { review_id, comment }
+            }
+            ReviewOperationCli::Reject { review_id, comment } => {
+                commands::ReviewOperation::Reject { review_id, comment }
+            }
+            ReviewOperationCli::List { spec_id, status } => {
+                commands::ReviewOperation::List { spec_id, status }
+            }
         }
     }
 }
@@ -309,7 +337,13 @@ impl From<ConflictOperationCli> for commands::ConflictOperation {
     fn from(op: ConflictOperationCli) -> Self {
         match op {
             ConflictOperationCli::List { spec_id } => commands::ConflictOperation::List { spec_id },
-            ConflictOperationCli::Resolve { conflict_id, strategy } => commands::ConflictOperation::Resolve { conflict_id, strategy },
+            ConflictOperationCli::Resolve {
+                conflict_id,
+                strategy,
+            } => commands::ConflictOperation::Resolve {
+                conflict_id,
+                strategy,
+            },
         }
     }
 }
@@ -362,7 +396,11 @@ async fn main() -> anyhow::Result<()> {
             let mut server = mcp::McpServer::new()?;
             server.run().await?;
         }
-        Commands::Workflow { id, operation, stage } => {
+        Commands::Workflow {
+            id,
+            operation,
+            stage,
+        } => {
             let op = match operation.as_str() {
                 "advance" => commands::WorkflowOperation::Advance {
                     target_stage: stage,
@@ -370,7 +408,10 @@ async fn main() -> anyhow::Result<()> {
                 "history" => commands::WorkflowOperation::History,
                 "status" => commands::WorkflowOperation::Status,
                 _ => {
-                    eprintln!("Invalid operation: {}. Use: advance, history, or status", operation);
+                    eprintln!(
+                        "Invalid operation: {}. Use: advance, history, or status",
+                        operation
+                    );
                     std::process::exit(1);
                 }
             };
@@ -389,9 +430,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Export { id, output, tables } => {
             let paths = config::ManifoldPaths::new()?;
             let db = db::Database::open(&paths)?;
-            
+
             let output_path = std::path::Path::new(&output);
-            
+
             if id == "all" {
                 // Export all specs
                 let spec_rows = db.list_specs(None, None)?;
@@ -399,15 +440,16 @@ async fn main() -> anyhow::Result<()> {
                     .into_iter()
                     .filter_map(|row| serde_json::from_value(row.data).ok())
                     .collect();
-                
+
                 export::MarkdownRenderer::export_multi(&specs, output_path, tables)?;
                 println!("✓ Exported {} specs to {}", specs.len(), output);
             } else {
                 // Export single spec
-                let spec_row = db.get_spec(&id)?
+                let spec_row = db
+                    .get_spec(&id)?
                     .ok_or_else(|| anyhow::anyhow!("Spec not found: {}", id))?;
                 let spec: models::SpecData = serde_json::from_value(spec_row.data)?;
-                
+
                 export::MarkdownRenderer::export_to_file(&spec, output_path, tables)?;
                 println!("✓ Exported spec {} to {}", id, output);
             }

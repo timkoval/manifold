@@ -32,7 +32,10 @@ impl std::str::FromStr for Boundary {
             "personal" => Ok(Boundary::Personal),
             "work" => Ok(Boundary::Work),
             "company" => Ok(Boundary::Company),
-            _ => Err(format!("Invalid boundary: {}. Use: personal, work, company", s)),
+            _ => Err(format!(
+                "Invalid boundary: {}. Use: personal, work, company",
+                s
+            )),
         }
     }
 }
@@ -206,25 +209,25 @@ pub struct History {
 pub struct SpecData {
     #[serde(rename = "$schema", default = "default_schema")]
     pub schema: String,
-    
+
     pub spec_id: String,
     pub project: String,
     pub boundary: Boundary,
     pub name: String,
-    
+
     pub stage: WorkflowStage,
     #[serde(default)]
     pub stages_completed: Vec<WorkflowStage>,
-    
+
     #[serde(default)]
     pub requirements: Vec<Requirement>,
-    
+
     #[serde(default)]
     pub tasks: Vec<Task>,
-    
+
     #[serde(default)]
     pub decisions: Vec<Decision>,
-    
+
     pub history: History,
 }
 
@@ -254,21 +257,21 @@ impl SpecData {
             },
         }
     }
-    
+
     /// Get the current workflow stage
     /// Utility method for external consumers of the library
     #[allow(dead_code)]
     pub fn current_stage(&self) -> &WorkflowStage {
         &self.stage
     }
-    
+
     /// Get requirement by ID
     /// Utility method for external consumers of the library
     #[allow(dead_code)]
     pub fn get_requirement(&self, id: &str) -> Option<&Requirement> {
         self.requirements.iter().find(|r| r.id == id)
     }
-    
+
     /// Get task by ID
     /// Utility method for external consumers of the library
     #[allow(dead_code)]

@@ -135,9 +135,18 @@ impl ConflictResolver {
     ) -> Result<Vec<Conflict>> {
         let mut conflicts = Vec::new();
 
-        let local_arr = local_array.and_then(|v| v.as_array()).cloned().unwrap_or_default();
-        let remote_arr = remote_array.and_then(|v| v.as_array()).cloned().unwrap_or_default();
-        let base_arr = base_array.and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let local_arr = local_array
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let remote_arr = remote_array
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let base_arr = base_array
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
 
         // Build maps by ID for easier comparison
         let local_map: std::collections::HashMap<String, &Value> = local_arr
@@ -172,7 +181,7 @@ impl ConflictResolver {
             if let Some(remote_item) = remote_map.get(id) {
                 if local_item != remote_item {
                     let base_item = base_map.get(id);
-                    
+
                     // Check if both changed
                     let local_changed = base_item.map_or(true, |base| local_item != base);
                     let remote_changed = base_item.map_or(true, |base| remote_item != base);
@@ -223,9 +232,10 @@ impl ConflictResolver {
             ResolutionStrategy::Ours => {
                 Ok((conflict.local_value.clone(), ConflictStatus::ResolvedLocal))
             }
-            ResolutionStrategy::Theirs => {
-                Ok((conflict.remote_value.clone(), ConflictStatus::ResolvedRemote))
-            }
+            ResolutionStrategy::Theirs => Ok((
+                conflict.remote_value.clone(),
+                ConflictStatus::ResolvedRemote,
+            )),
             ResolutionStrategy::Manual => {
                 if let Some(value) = manual_value {
                     Ok((value, ConflictStatus::ResolvedManual))
@@ -248,7 +258,7 @@ impl ConflictResolver {
             conflict.remote_value.as_array(),
         ) {
             let mut merged = local_arr.clone();
-            
+
             // Add items from remote that aren't in local
             for remote_item in remote_arr {
                 if let Some(remote_id) = remote_item.get("id") {
@@ -267,16 +277,13 @@ impl ConflictResolver {
     }
 
     /// Apply resolved conflicts to spec
-    pub fn apply_resolutions(
-        spec: &mut SpecData,
-        resolutions: &[(String, Value)],
-    ) -> Result<()> {
+    pub fn apply_resolutions(spec: &mut SpecData, resolutions: &[(String, Value)]) -> Result<()> {
         let mut spec_json = serde_json::to_value(&spec)?;
 
         for (field_path, value) in resolutions {
             // Parse field path (e.g., "name" or "requirements/req-001")
             let parts: Vec<&str> = field_path.split('/').collect();
-            
+
             if parts.len() == 1 {
                 // Top-level field
                 spec_json[parts[0]] = value.clone();
@@ -284,9 +291,10 @@ impl ConflictResolver {
                 // Array item by ID
                 if let Some(array) = spec_json[parts[0]].as_array_mut() {
                     let id = parts[1];
-                    if let Some(item) = array.iter_mut().find(|item| {
-                        item.get("id").and_then(|v| v.as_str()) == Some(id)
-                    }) {
+                    if let Some(item) = array
+                        .iter_mut()
+                        .find(|item| item.get("id").and_then(|v| v.as_str()) == Some(id))
+                    {
                         *item = value.clone();
                     }
                 }

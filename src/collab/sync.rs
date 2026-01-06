@@ -49,19 +49,20 @@ impl SyncManager {
             .current_dir(&self.config.repo_path)
             .output()?;
 
-        println!("✓ Initialized sync repository at {:?}", self.config.repo_path);
+        println!(
+            "✓ Initialized sync repository at {:?}",
+            self.config.repo_path
+        );
         Ok(())
     }
 
     /// Export spec to git repository as JSON file
     pub fn export_spec(&self, spec: &SpecData) -> Result<PathBuf> {
         let spec_file = self.config.repo_path.join(format!("{}.json", spec.spec_id));
-        
-        let json = serde_json::to_string_pretty(spec)
-            .context("Failed to serialize spec")?;
-        
-        fs::write(&spec_file, json)
-            .context("Failed to write spec file")?;
+
+        let json = serde_json::to_string_pretty(spec).context("Failed to serialize spec")?;
+
+        fs::write(&spec_file, json).context("Failed to write spec file")?;
 
         Ok(spec_file)
     }
@@ -69,16 +70,14 @@ impl SyncManager {
     /// Import spec from git repository
     pub fn import_spec(&self, spec_id: &str) -> Result<SpecData> {
         let spec_file = self.config.repo_path.join(format!("{}.json", spec_id));
-        
+
         if !spec_file.exists() {
             return Err(anyhow!("Spec file not found: {}", spec_id));
         }
 
-        let json = fs::read_to_string(&spec_file)
-            .context("Failed to read spec file")?;
-        
-        let spec: SpecData = serde_json::from_str(&json)
-            .context("Failed to parse spec JSON")?;
+        let json = fs::read_to_string(&spec_file).context("Failed to read spec file")?;
+
+        let spec: SpecData = serde_json::from_str(&json).context("Failed to parse spec JSON")?;
 
         Ok(spec)
     }
@@ -159,7 +158,9 @@ impl SyncManager {
             let stderr = String::from_utf8_lossy(&output.stderr);
             // Check for conflicts
             if stderr.contains("CONFLICT") {
-                return Err(anyhow!("Merge conflicts detected. Run 'manifold conflicts list' to see conflicts."));
+                return Err(anyhow!(
+                    "Merge conflicts detected. Run 'manifold conflicts list' to see conflicts."
+                ));
             }
             return Err(anyhow!("Git pull failed: {}", stderr));
         }
@@ -231,7 +232,7 @@ impl SyncManager {
     /// List all spec files in repository
     pub fn list_specs(&self) -> Result<Vec<String>> {
         let mut specs = Vec::new();
-        
+
         if !self.config.repo_path.exists() {
             return Ok(specs);
         }
@@ -239,7 +240,7 @@ impl SyncManager {
         for entry in fs::read_dir(&self.config.repo_path)? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.extension().and_then(|s| s.to_str()) == Some("json") {
                 if let Some(stem) = path.file_stem() {
                     if let Some(spec_id) = stem.to_str() {

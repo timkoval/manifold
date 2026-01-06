@@ -3,7 +3,7 @@
 //! Provides interactive session for editing specs with LLM assistance
 
 use anyhow::{Context, Result};
-use rustyline::{DefaultEditor, error::ReadlineError};
+use rustyline::{error::ReadlineError, DefaultEditor};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -26,8 +26,7 @@ impl Default for LlmConfig {
                 .unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
             api_key: std::env::var("OPENAI_API_KEY")
                 .unwrap_or_else(|_| "sk-dummy-key-for-testing".to_string()),
-            model: std::env::var("OPENAI_MODEL")
-                .unwrap_or_else(|_| "gpt-4".to_string()),
+            model: std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4".to_string()),
         }
     }
 }
@@ -64,23 +63,24 @@ impl LlmSession {
     /// Create a new LLM editing session
     pub fn new(spec_id: String, paths: &ManifoldPaths) -> Result<Self> {
         let db = Database::open(paths)?;
-        
+
         // Load config and use it for LLM settings
         let config = crate::config::load_config()?;
         let llm_config = LlmConfig {
-            api_url: config.llm.endpoint
-                .unwrap_or_else(|| std::env::var("OPENAI_API_BASE")
-                    .unwrap_or_else(|_| "https://api.openai.com/v1".to_string())),
+            api_url: config.llm.endpoint.unwrap_or_else(|| {
+                std::env::var("OPENAI_API_BASE")
+                    .unwrap_or_else(|_| "https://api.openai.com/v1".to_string())
+            }),
             api_key: std::env::var("OPENAI_API_KEY")
                 .unwrap_or_else(|_| "sk-dummy-key-for-testing".to_string()),
-            model: config.llm.model
-                .unwrap_or_else(|| std::env::var("OPENAI_MODEL")
-                    .unwrap_or_else(|_| "gpt-4".to_string())),
+            model: config.llm.model.unwrap_or_else(|| {
+                std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4".to_string())
+            }),
         };
-        
+
         // Check if API key is set (allow dummy key for testing)
-        let llm_enabled = !llm_config.api_key.is_empty() 
-            && llm_config.api_key != "sk-dummy-key-for-testing";
+        let llm_enabled =
+            !llm_config.api_key.is_empty() && llm_config.api_key != "sk-dummy-key-for-testing";
 
         Ok(Self {
             spec_id,
@@ -96,7 +96,7 @@ impl LlmSession {
     pub async fn run(&mut self) -> Result<()> {
         // Load initial spec
         let spec = self.load_spec()?;
-        
+
         println!("╔═══════════════════════════════════════════════════════════════╗");
         println!("║  Manifold LLM Editing Session                                ║");
         println!("╚═══════════════════════════════════════════════════════════════╝");
@@ -107,20 +107,20 @@ impl LlmSession {
         println!("Tasks: {}", spec.tasks.len());
         println!("Decisions: {}", spec.decisions.len());
         println!();
-        
+
         if !self.llm_enabled {
             println!("⚠️  LLM API not configured (OPENAI_API_KEY not set)");
             println!("   Running in command-only mode.");
             println!();
         }
-        
+
         println!("Commands:");
         println!("  /status     - Show current spec status");
         println!("  /advance    - Advance workflow stage");
         println!("  /show       - Show full spec JSON");
         println!("  /exit       - Exit session");
         println!();
-        
+
         if self.llm_enabled {
             println!("Type your message to chat with the AI about your spec...");
         } else {
@@ -133,15 +133,19 @@ impl LlmSession {
 
         // Start REPL
         let mut rl = DefaultEditor::new()?;
-        
+
         loop {
-            let prompt = if self.llm_enabled { "You> " } else { "manifold> " };
+            let prompt = if self.llm_enabled {
+                "You> "
+            } else {
+                "manifold> "
+            };
             let readline = rl.readline(prompt);
-            
+
             match readline {
                 Ok(line) => {
                     let trimmed = line.trim();
-                    
+
                     if trimmed.is_empty() {
                         continue;
                     }
@@ -199,7 +203,7 @@ impl LlmSession {
     /// Initialize system prompt with spec context
     fn init_system_prompt(&mut self, spec: &SpecData) {
         let spec_json = serde_json::to_string_pretty(spec).unwrap_or_default();
-        
+
         let system_prompt = format!(
             r#"You are an expert requirements engineer helping to edit a specification in the Manifold system.
 
@@ -251,9 +255,13 @@ Be concise and practical. Focus on quality requirements engineering practices."#
         });
 
         // Call LLM API
-        let response = self.client
+        let response = self
+            .client
             .post(format!("{}/chat/completions", self.llm_config.api_url))
-            .header("Authorization", format!("Bearer {}", self.llm_config.api_key))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.llm_config.api_key),
+            )
             .header("Content-Type", "application/json")
             .json(&request_body)
             .send()
@@ -271,7 +279,8 @@ Be concise and practical. Focus on quality requirements engineering practices."#
             .await
             .context("Failed to parse LLM response")?;
 
-        let assistant_message = completion.choices
+        let assistant_message = completion
+            .choices
             .first()
             .ok_or_else(|| anyhow::anyhow!("No response from LLM"))?
             .message
@@ -321,16 +330,19 @@ Be concise and practical. Focus on quality requirements engineering practices."#
             }
             "/advance" => {
                 println!("\n🔄 Checking if workflow can advance...");
-                
+
                 // Use workflow engine to check
                 let spec = self.load_spec()?;
                 match crate::workflow::WorkflowEngine::can_advance(&spec) {
                     Ok(next_stage) => {
                         println!("✓ Can advance to: {}", next_stage);
                         println!("\nAdvancing workflow stage...");
-                        
+
                         // Actually advance
-                        match crate::workflow::WorkflowEngine::advance_stage(&spec, next_stage.clone()) {
+                        match crate::workflow::WorkflowEngine::advance_stage(
+                            &spec,
+                            next_stage.clone(),
+                        ) {
                             Ok(transition) => {
                                 // Update spec
                                 let mut updated_spec = spec.clone();
@@ -339,7 +351,7 @@ Be concise and practical. Focus on quality requirements engineering practices."#
                                 }
                                 updated_spec.stage = transition.to.clone();
                                 updated_spec.history.updated_at = chrono::Utc::now().timestamp();
-                                
+
                                 // Log event
                                 self.db.log_workflow_event(
                                     &updated_spec.spec_id,
@@ -347,13 +359,16 @@ Be concise and practical. Focus on quality requirements engineering practices."#
                                     &transition.event.as_string(),
                                     "llm-session",
                                     updated_spec.history.updated_at,
-                                    Some(&format!("Advanced from {} to {}", transition.from, transition.to)),
+                                    Some(&format!(
+                                        "Advanced from {} to {}",
+                                        transition.from, transition.to
+                                    )),
                                 )?;
-                                
+
                                 self.db.update_spec(&updated_spec)?;
-                                
+
                                 println!("✓ Advanced to stage: {}", transition.to);
-                                
+
                                 // Update system prompt with new stage
                                 self.init_system_prompt(&updated_spec);
                             }
@@ -384,13 +399,14 @@ Be concise and practical. Focus on quality requirements engineering practices."#
 
     /// Load current spec from database
     fn load_spec(&self) -> Result<SpecData> {
-        let spec_row = self.db
+        let spec_row = self
+            .db
             .get_spec(&self.spec_id)?
             .ok_or_else(|| anyhow::anyhow!("Spec not found: {}", self.spec_id))?;
-        
-        let spec: SpecData = serde_json::from_value(spec_row.data)
-            .context("Failed to parse spec data")?;
-        
+
+        let spec: SpecData =
+            serde_json::from_value(spec_row.data).context("Failed to parse spec data")?;
+
         Ok(spec)
     }
 }

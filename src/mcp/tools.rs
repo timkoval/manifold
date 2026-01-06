@@ -1,10 +1,123 @@
 //! MCP tool implementations
 
-use anyhow::{Result, bail};
-use serde_json::{json, Value};
 use crate::db::Database;
-use crate::models::{SpecData, WorkflowStage, Boundary, PatchEntry};
+use crate::models::{Boundary, PatchEntry, SpecData, WorkflowStage};
 use crate::workflow::WorkflowEngine;
+use anyhow::{bail, Result};
+use serde_json::{json, Value};
+use std::collections::HashSet;
+
+/// Valid top-level fields in SpecData (excluding read-only fields)
+const VALID_MUTABLE_PATHS: &[&str] = &["name", "requirements", "tasks", "decisions"];
+
+/// Valid fields for a Requirement object
+const VALID_REQUIREMENT_FIELDS: &[&str] = &[
+    "id",
+    "capability",
+    "title",
+    "shall",
+    "rationale",
+    "priority",
+    "tags",
+    "scenarios",
+];
+
+/// Valid fields for a Scenario object
+const VALID_SCENARIO_FIELDS: &[&str] = &["id", "name", "given", "when", "then", "edge_cases"];
+
+/// Valid fields for a Task object
+const VALID_TASK_FIELDS: &[&str] = &[
+    "id",
+    "requirement_ids",
+    "title",
+    "description",
+    "status",
+    "assignee",
+    "acceptance",
+];
+
+/// Valid fields for a Decision object  
+const VALID_DECISION_FIELDS: &[&str] = &[
+    "id",
+    "title",
+    "context",
+    "decision",
+    "rationale",
+    "alternatives_rejected",
+    "date",
+];
+
+/// Validate that a patch path targets a known field
+fn validate_patch_path(path: &str) -> Result<()> {
+    // Parse path like "/requirements/-" or "/requirements/0/title"
+    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+
+    if parts.is_empty() || parts[0].is_empty() {
+        bail!("Invalid patch path: '{}' - path cannot be empty", path);
+    }
+
+    let root = parts[0];
+
+    // Check if root path is valid
+    if !VALID_MUTABLE_PATHS.contains(&root) {
+        bail!(
+            "Invalid patch path: '{}' - '{}' is not a valid field. Valid fields are: {}",
+            path,
+            root,
+            VALID_MUTABLE_PATHS.join(", ")
+        );
+    }
+
+    Ok(())
+}
+
+/// Validate that an object being added/replaced has only valid fields
+fn validate_object_fields(path: &str, value: &Value) -> Result<()> {
+    let obj = match value.as_object() {
+        Some(o) => o,
+        None => return Ok(()), // Not an object, nothing to validate
+    };
+
+    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    if parts.is_empty() {
+        return Ok(());
+    }
+
+    // Determine which schema to validate against based on path
+    let valid_fields: &[&str] = match parts[0] {
+        "requirements" => {
+            // Check if we're adding a scenario inside a requirement
+            if parts.len() >= 3 && parts.get(2) == Some(&"scenarios") {
+                VALID_SCENARIO_FIELDS
+            } else {
+                VALID_REQUIREMENT_FIELDS
+            }
+        }
+        "tasks" => VALID_TASK_FIELDS,
+        "decisions" => VALID_DECISION_FIELDS,
+        _ => return Ok(()), // Unknown path, already validated above
+    };
+
+    let valid_set: HashSet<&str> = valid_fields.iter().copied().collect();
+    let mut invalid_fields = Vec::new();
+
+    for key in obj.keys() {
+        if !valid_set.contains(key.as_str()) {
+            invalid_fields.push(key.clone());
+        }
+    }
+
+    if !invalid_fields.is_empty() {
+        bail!(
+            "Invalid fields in patch value for '{}': [{}]. Valid fields are: {}",
+            path,
+            invalid_fields.join(", "),
+            valid_fields.join(", ")
+        );
+    }
+
+    Ok(())
+}
 
 /// Create a new spec
 pub async fn create_spec(db: &mut Database, args: Value) -> Result<Value> {
@@ -77,10 +190,32 @@ pub async fn apply_patch(db: &mut Database, args: Value) -> Result<Value> {
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Missing 'summary' parameter"))?;
 
+    // Validate all patch operations before applying
+    for (i, op) in patch_ops.iter().enumerate() {
+        let path = op["path"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Patch operation {} missing 'path'", i))?;
+
+        let op_type = op["op"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Patch operation {} missing 'op'", i))?;
+
+        // Validate the path targets a known field
+        validate_patch_path(path)?;
+
+        // For add/replace operations, validate the value has valid fields
+        if op_type == "add" || op_type == "replace" {
+            if let Some(value) = op.get("value") {
+                validate_object_fields(path, value)?;
+            }
+        }
+    }
+
     // Get current spec
-    let spec_row = db.get_spec(spec_id)?
+    let spec_row = db
+        .get_spec(spec_id)?
         .ok_or_else(|| anyhow::anyhow!("Spec not found: {}", spec_id))?;
-    let mut spec: SpecData = serde_json::from_value(spec_row.data)?;
+    let mut spec: SpecData = serde_json::from_value(spec_row.data.clone())?;
 
     // Convert to JSON for patching
     let mut spec_json = serde_json::to_value(&spec)?;
@@ -92,7 +227,7 @@ pub async fn apply_patch(db: &mut Database, args: Value) -> Result<Value> {
         .map_err(|e| anyhow::anyhow!("Failed to apply patch: {}", e))?;
 
     // Convert back to SpecData
-    spec = serde_json::from_value(spec_json)?;
+    spec = serde_json::from_value(spec_json.clone())?;
 
     // Update history
     let now = chrono::Utc::now().timestamp();
@@ -135,7 +270,8 @@ pub async fn advance_workflow(db: &mut Database, args: Value) -> Result<Value> {
     };
 
     // Get current spec
-    let spec_row = db.get_spec(spec_id)?
+    let spec_row = db
+        .get_spec(spec_id)?
         .ok_or_else(|| anyhow::anyhow!("Spec not found: {}", spec_id))?;
     let mut spec: SpecData = serde_json::from_value(spec_row.data)?;
 
@@ -167,7 +303,10 @@ pub async fn advance_workflow(db: &mut Database, args: Value) -> Result<Value> {
                 &transition.event.as_string(),
                 "mcp",
                 now,
-                Some(&format!("Advanced from {} to {}", transition.from, transition.to)),
+                Some(&format!(
+                    "Advanced from {} to {}",
+                    transition.from, transition.to
+                )),
             )?;
 
             // Update in database
@@ -236,8 +375,10 @@ pub async fn query_manifold(db: &Database, args: Value) -> Result<Value> {
         .map(|spec| {
             // Parse the data to get the name
             let spec_data: Result<SpecData, _> = serde_json::from_value(spec.data.clone());
-            let name = spec_data.map(|s| s.name).unwrap_or_else(|_| "Unknown".to_string());
-            
+            let name = spec_data
+                .map(|s| s.name)
+                .unwrap_or_else(|_| "Unknown".to_string());
+
             json!({
                 "spec_id": spec.id,
                 "project": spec.project,

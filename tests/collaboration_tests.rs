@@ -14,7 +14,7 @@ use tempfile::TempDir;
 /// Setup test environment
 fn setup() -> anyhow::Result<(TempDir, ManifoldPaths, Database)> {
     let temp_dir = TempDir::new()?;
-    
+
     // Create a custom ManifoldPaths for testing
     let paths = ManifoldPaths {
         root: temp_dir.path().to_path_buf(),
@@ -44,23 +44,23 @@ fn create_test_spec(spec_id: &str, project: &str, name: &str) -> SpecData {
 #[test]
 fn test_conflict_detection_simple() -> Result<()> {
     let (_temp, _paths, _db) = setup()?;
-    
+
     // Create base, local, and remote specs with different names
     let base = create_test_spec("test-spec", "test-project", "Original Name");
-    
+
     let mut local = base.clone();
     local.name = "Local Name".to_string();
-    
+
     let mut remote = base.clone();
     remote.name = "Remote Name".to_string();
-    
+
     // Detect conflicts
     let conflicts = ConflictResolver::detect_conflicts(&local, &remote, Some(&base))?;
-    
+
     assert_eq!(conflicts.len(), 1);
     assert_eq!(conflicts[0].field_path, "name");
     assert_eq!(conflicts[0].status, ConflictStatus::Unresolved);
-    
+
     Ok(())
 }
 
@@ -76,13 +76,16 @@ fn test_conflict_resolution_ours() -> Result<()> {
         detected_at: 0,
         status: ConflictStatus::Unresolved,
     };
-    
-    let (resolved_value, status) = 
+
+    let (resolved_value, status) =
         ConflictResolver::resolve_conflict(&conflict, ResolutionStrategy::Ours, None)?;
-    
-    assert_eq!(resolved_value, serde_json::Value::String("Local".to_string()));
+
+    assert_eq!(
+        resolved_value,
+        serde_json::Value::String("Local".to_string())
+    );
     assert_eq!(status, ConflictStatus::ResolvedLocal);
-    
+
     Ok(())
 }
 
@@ -98,89 +101,93 @@ fn test_conflict_resolution_theirs() -> Result<()> {
         detected_at: 0,
         status: ConflictStatus::Unresolved,
     };
-    
-    let (resolved_value, status) = 
+
+    let (resolved_value, status) =
         ConflictResolver::resolve_conflict(&conflict, ResolutionStrategy::Theirs, None)?;
-    
-    assert_eq!(resolved_value, serde_json::Value::String("Remote".to_string()));
+
+    assert_eq!(
+        resolved_value,
+        serde_json::Value::String("Remote".to_string())
+    );
     assert_eq!(status, ConflictStatus::ResolvedRemote);
-    
+
     Ok(())
 }
 
 #[test]
 fn test_3way_merge() -> Result<()> {
     let base = create_test_spec("test-spec", "test-project", "Original");
-    
+
     let mut local = base.clone();
     local.name = "Modified Locally".to_string();
-    
+
     let mut remote = base.clone();
     remote.project = "modified-project".to_string();
-    
+
     let conflicts = ConflictResolver::detect_conflicts(&local, &remote, Some(&base))?;
-    
+
     // Should be no conflicts since different fields changed
     assert_eq!(conflicts.len(), 0);
-    
+
     Ok(())
 }
 
 #[test]
 fn test_merge_strategy() -> Result<()> {
     let base = create_test_spec("test-spec", "test-project", "Original");
-    
+
     let mut local = base.clone();
     local.name = "Local Name".to_string();
-    
+
     let mut remote = base.clone();
     remote.name = "Remote Name".to_string();
-    
+
     let conflicts = ConflictResolver::detect_conflicts(&local, &remote, Some(&base))?;
     assert_eq!(conflicts.len(), 1);
-    
-    let result = ConflictResolver::resolve_conflict(
-        &conflicts[0],
-        ResolutionStrategy::Merge,
-        None,
-    );
-    
+
+    let result = ConflictResolver::resolve_conflict(&conflicts[0], ResolutionStrategy::Merge, None);
+
     // Merge strategy may succeed or fail for string conflicts
     // If it fails, we can fall back to manual resolution
     match result {
         Ok((_, status)) => {
-            assert!(matches!(status, ConflictStatus::ResolvedLocal | ConflictStatus::ResolvedRemote | ConflictStatus::ResolvedManual));
+            assert!(matches!(
+                status,
+                ConflictStatus::ResolvedLocal
+                    | ConflictStatus::ResolvedRemote
+                    | ConflictStatus::ResolvedManual
+            ));
         }
         Err(_) => {
             // Merge failed, which is acceptable for this type of conflict
         }
     }
-    
+
     Ok(())
 }
 
 #[test]
 fn test_manual_strategy() -> Result<()> {
     let base = create_test_spec("test-spec", "test-project", "Original");
-    
+
     let mut local = base.clone();
     local.name = "Local Name".to_string();
-    
+
     let mut remote = base.clone();
     remote.name = "Remote Name".to_string();
-    
+
     let conflicts = ConflictResolver::detect_conflicts(&local, &remote, Some(&base))?;
-    
+
     let manual_value = serde_json::Value::String("Manually Resolved".to_string());
     let (resolved_value, status) = ConflictResolver::resolve_conflict(
         &conflicts[0],
         ResolutionStrategy::Manual,
         Some(manual_value.clone()),
     )?;
-    
+
     assert_eq!(resolved_value, manual_value);
     assert_eq!(status, ConflictStatus::ResolvedManual);
-    
+
     Ok(())
 }
 
@@ -212,7 +219,11 @@ fn test_review_rejection() -> Result<()> {
         "reviewer@example.com".to_string(),
     );
 
-    ReviewManager::reject(&mut review, "reviewer@example.com", "Needs work".to_string())?;
+    ReviewManager::reject(
+        &mut review,
+        "reviewer@example.com",
+        "Needs work".to_string(),
+    )?;
     assert_eq!(review.status, ReviewStatus::Rejected);
     assert_eq!(review.comment, Some("Needs work".to_string()));
 
@@ -235,7 +246,7 @@ fn test_review_persistence() -> Result<()> {
 
     db.save_review(&review)?;
     let loaded = db.get_review(&review.id)?;
-    
+
     assert!(loaded.is_some());
     let loaded = loaded.unwrap();
     assert_eq!(loaded.id, review.id);
@@ -247,37 +258,37 @@ fn test_review_persistence() -> Result<()> {
 #[test]
 fn test_multiple_conflicts() -> Result<()> {
     let base = create_test_spec("test-spec", "test-project", "Original");
-    
+
     let mut local = base.clone();
     local.name = "Local Name".to_string();
     // Note: project field changes are not detected as conflicts if both local and remote modify it the same way
-    
+
     let mut remote = base.clone();
     remote.name = "Remote Name".to_string();
     // Both changed the name field -> 1 conflict
-    
+
     let conflicts = ConflictResolver::detect_conflicts(&local, &remote, Some(&base))?;
-    
+
     // Only name field differs
     assert!(conflicts.len() >= 1);
-    
+
     Ok(())
 }
 
 #[test]
 fn test_no_conflicts_same_changes() -> Result<()> {
     let base = create_test_spec("test-spec", "test-project", "Original");
-    
+
     let mut local = base.clone();
     local.name = "Same Name".to_string();
-    
+
     let mut remote = base.clone();
     remote.name = "Same Name".to_string();
-    
+
     let conflicts = ConflictResolver::detect_conflicts(&local, &remote, Some(&base))?;
-    
+
     assert_eq!(conflicts.len(), 0);
-    
+
     Ok(())
 }
 
@@ -330,12 +341,12 @@ fn test_conflict_status_update() -> Result<()> {
     };
 
     db.save_conflict(&conflict)?;
-    
+
     // Verify conflict is unresolved
     let unresolved = db.get_conflicts("spec-status")?;
     assert_eq!(unresolved.len(), 1);
     assert_eq!(unresolved[0].status, ConflictStatus::Unresolved);
-    
+
     // Update status
     db.update_conflict_status("conflict-2", &ConflictStatus::ResolvedLocal)?;
 
@@ -354,9 +365,10 @@ fn test_conflict_with_resolutions() -> Result<()> {
     db.insert_spec(&spec)?;
 
     // Simulate resolution
-    let resolutions = vec![
-        ("name".to_string(), serde_json::Value::String("Resolved Name".to_string())),
-    ];
+    let resolutions = vec![(
+        "name".to_string(),
+        serde_json::Value::String("Resolved Name".to_string()),
+    )];
 
     ConflictResolver::apply_resolutions(&mut spec, &resolutions)?;
     assert_eq!(spec.name, "Resolved Name");

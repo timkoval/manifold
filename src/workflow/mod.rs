@@ -59,18 +59,15 @@ pub enum WorkflowError {
         to: String,
         reason: String,
     },
-    
+
     #[error("Validation failed: {0}")]
     ValidationFailed(String),
-    
+
     #[error("Already at stage: {0}")]
     AlreadyAtStage(String),
-    
+
     #[error("Cannot go backwards from {from} to {to}")]
-    BackwardTransition {
-        from: String,
-        to: String,
-    },
+    BackwardTransition { from: String, to: String },
 }
 
 /// Workflow engine for managing spec transitions
@@ -83,12 +80,12 @@ impl WorkflowEngine {
         target_stage: WorkflowStage,
     ) -> Result<WorkflowTransition, WorkflowError> {
         let current = &spec.stage;
-        
+
         // Check if already at target stage
         if current == &target_stage {
             return Err(WorkflowError::AlreadyAtStage(target_stage.to_string()));
         }
-        
+
         // Check if trying to go backwards
         if Self::stage_index(&target_stage) <= Self::stage_index(current) {
             return Err(WorkflowError::BackwardTransition {
@@ -96,20 +93,20 @@ impl WorkflowEngine {
                 to: target_stage.to_string(),
             });
         }
-        
+
         // Validate the transition
         Self::validate_transition(spec, current, &target_stage)?;
-        
+
         // Create transition event
         let event = WorkflowEvent::Transition(current.clone(), target_stage.clone());
-        
+
         Ok(WorkflowTransition {
             from: current.clone(),
             to: target_stage,
             event,
         })
     }
-    
+
     /// Validate that a spec can transition to the next stage
     fn validate_transition(
         spec: &SpecData,
@@ -124,7 +121,7 @@ impl WorkflowEngine {
                         "Cannot advance to design: no requirements defined".to_string(),
                     ));
                 }
-                
+
                 // Check that at least one requirement has a SHALL statement
                 let has_shall = spec.requirements.iter().any(|r| !r.shall.is_empty());
                 if !has_shall {
@@ -132,10 +129,10 @@ impl WorkflowEngine {
                         "Cannot advance to design: no SHALL statements defined".to_string(),
                     ));
                 }
-                
+
                 Ok(())
             }
-            
+
             // design -> tasks: Must have at least one decision
             (WorkflowStage::Design, WorkflowStage::Tasks) => {
                 if spec.decisions.is_empty() {
@@ -145,7 +142,7 @@ impl WorkflowEngine {
                 }
                 Ok(())
             }
-            
+
             // tasks -> approval: Must have at least one task
             (WorkflowStage::Tasks, WorkflowStage::Approval) => {
                 if spec.tasks.is_empty() {
@@ -153,24 +150,23 @@ impl WorkflowEngine {
                         "Cannot advance to approval: no tasks defined".to_string(),
                     ));
                 }
-                
+
                 // Check that all tasks have requirement traceability
                 for task in &spec.tasks {
                     if task.requirement_ids.is_empty() {
-                        return Err(WorkflowError::ValidationFailed(
-                            format!("Task {} has no requirement traceability", task.id),
-                        ));
+                        return Err(WorkflowError::ValidationFailed(format!(
+                            "Task {} has no requirement traceability",
+                            task.id
+                        )));
                     }
                 }
-                
+
                 Ok(())
             }
-            
+
             // approval -> implemented: No automatic validation (manual approval required)
-            (WorkflowStage::Approval, WorkflowStage::Implemented) => {
-                Ok(())
-            }
-            
+            (WorkflowStage::Approval, WorkflowStage::Implemented) => Ok(()),
+
             // All other transitions
             _ => Err(WorkflowError::InvalidTransition {
                 from: from.to_string(),
@@ -179,7 +175,7 @@ impl WorkflowEngine {
             }),
         }
     }
-    
+
     /// Get numeric index for stage (for comparison)
     fn stage_index(stage: &WorkflowStage) -> usize {
         match stage {
@@ -190,7 +186,7 @@ impl WorkflowEngine {
             WorkflowStage::Implemented => 4,
         }
     }
-    
+
     /// Get the next stage in the workflow
     pub fn next_stage(current: &WorkflowStage) -> Option<WorkflowStage> {
         match current {
@@ -201,11 +197,11 @@ impl WorkflowEngine {
             WorkflowStage::Implemented => None,
         }
     }
-    
+
     /// Check if a stage can be advanced
     pub fn can_advance(spec: &SpecData) -> Result<WorkflowStage, WorkflowError> {
         let current = &spec.stage;
-        
+
         match Self::next_stage(current) {
             Some(next) => {
                 Self::validate_transition(spec, current, &next)?;
@@ -242,7 +238,7 @@ impl WorkflowTransition {
 mod tests {
     use super::*;
     use crate::models::{Boundary, Priority, Requirement};
-    
+
     fn create_test_spec(stage: WorkflowStage) -> SpecData {
         let mut spec = SpecData::new(
             "test-spec".to_string(),
@@ -253,7 +249,7 @@ mod tests {
         spec.stage = stage;
         spec
     }
-    
+
     #[test]
     fn test_cannot_advance_without_requirements() {
         let spec = create_test_spec(WorkflowStage::Requirements);
@@ -261,7 +257,7 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("no requirements"));
     }
-    
+
     #[test]
     fn test_can_advance_with_requirements() {
         let mut spec = create_test_spec(WorkflowStage::Requirements);
@@ -275,11 +271,11 @@ mod tests {
             tags: vec![],
             scenarios: vec![],
         });
-        
+
         let result = WorkflowEngine::advance_stage(&spec, WorkflowStage::Design);
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_cannot_advance_without_decisions() {
         let mut spec = create_test_spec(WorkflowStage::Design);
@@ -293,12 +289,15 @@ mod tests {
             tags: vec![],
             scenarios: vec![],
         });
-        
+
         let result = WorkflowEngine::advance_stage(&spec, WorkflowStage::Tasks);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("no design decisions"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no design decisions"));
     }
-    
+
     #[test]
     fn test_cannot_go_backwards() {
         let spec = create_test_spec(WorkflowStage::Design);

@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::str::FromStr;
 
-pub mod sync;
 pub mod conflicts;
 pub mod reviews;
+pub mod sync;
 
 /// Sync configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,8 +176,8 @@ impl FromStr for ReviewStatus {
 /// Resolution strategy for conflicts
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolutionStrategy {
-    Ours,      // Keep local changes
-    Theirs,    // Accept remote changes
-    Manual,    // User will resolve manually
-    Merge,     // Attempt automatic merge
+    Ours,   // Keep local changes
+    Theirs, // Accept remote changes
+    Manual, // User will resolve manually
+    Merge,  // Attempt automatic merge
 }

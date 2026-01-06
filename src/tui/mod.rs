@@ -57,7 +57,7 @@ impl TuiApp {
     pub fn new(paths: &ManifoldPaths) -> Result<Self> {
         let db = Database::open(paths)?;
         let specs = db.list_specs(None, None)?;
-        
+
         let mut list_state = ListState::default();
         if !specs.is_empty() {
             list_state.select(Some(0));
@@ -116,7 +116,10 @@ impl TuiApp {
             if event::poll(std::time::Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
                     // Handle popup-specific keys first
-                    if self.show_resolution_popup || self.show_bulk_popup || self.show_manual_edit_popup {
+                    if self.show_resolution_popup
+                        || self.show_bulk_popup
+                        || self.show_manual_edit_popup
+                    {
                         match key.code {
                             KeyCode::Esc => {
                                 self.show_resolution_popup = false;
@@ -156,7 +159,9 @@ impl TuiApp {
                                 }
                                 continue;
                             }
-                            KeyCode::Right if self.show_resolution_popup || self.show_bulk_popup => {
+                            KeyCode::Right
+                                if self.show_resolution_popup || self.show_bulk_popup =>
+                            {
                                 if self.selected_strategy < 3 {
                                     self.selected_strategy += 1;
                                 }
@@ -209,7 +214,9 @@ impl TuiApp {
                             // Load conflicts for selected spec
                             self.load_conflicts()?;
                         }
-                        KeyCode::Char('o') if self.selected_tab == 5 && !self.show_resolution_popup => {
+                        KeyCode::Char('o')
+                            if self.selected_tab == 5 && !self.show_resolution_popup =>
+                        {
                             // Open resolution popup
                             if self.conflict_list_state.selected().is_some() {
                                 self.show_resolution_popup = true;
@@ -246,9 +253,9 @@ impl TuiApp {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Header
-                Constraint::Min(0),      // Content
-                Constraint::Length(3),  // Footer
+                Constraint::Length(3), // Header
+                Constraint::Min(0),    // Content
+                Constraint::Length(3), // Footer
             ])
             .split(f.area());
 
@@ -259,8 +266,8 @@ impl TuiApp {
         let content_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(30),  // Spec list
-                Constraint::Percentage(70),  // Detail view
+                Constraint::Percentage(30), // Spec list
+                Constraint::Percentage(70), // Detail view
             ])
             .split(chunks[1]);
 
@@ -303,7 +310,9 @@ impl TuiApp {
                     _ => "❓",
                 };
 
-                let name = spec.data.get("name")
+                let name = spec
+                    .data
+                    .get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or(&spec.project);
 
@@ -313,15 +322,15 @@ impl TuiApp {
             .collect();
 
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!("Specs{} ({})", filter_text, self.specs.len()))
-            )
+            .block(Block::default().borders(Borders::ALL).title(format!(
+                "Specs{} ({})",
+                filter_text,
+                self.specs.len()
+            )))
             .highlight_style(
                 Style::default()
                     .bg(Color::Blue)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             )
             .highlight_symbol(">> ");
 
@@ -336,12 +345,23 @@ impl TuiApp {
             .constraints([Constraint::Length(3), Constraint::Min(0)])
             .split(area);
 
-        let titles = vec!["Overview", "Requirements", "Tasks", "Decisions", "History", "Conflicts"];
+        let titles = vec![
+            "Overview",
+            "Requirements",
+            "Tasks",
+            "Decisions",
+            "History",
+            "Conflicts",
+        ];
         let tabs = Tabs::new(titles)
             .block(Block::default().borders(Borders::ALL).title("Details"))
             .select(self.selected_tab)
             .style(Style::default().fg(Color::White))
-            .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            );
 
         f.render_widget(tabs, tabs_area[0]);
 
@@ -349,7 +369,7 @@ impl TuiApp {
         if let Some(selected) = self.list_state.selected() {
             if let Some(spec_row) = self.specs.get(selected) {
                 let content_area = tabs_area[1];
-                
+
                 match self.selected_tab {
                     0 => self.render_overview(f, content_area, spec_row),
                     1 => self.render_requirements(f, content_area, spec_row),
@@ -391,10 +411,13 @@ impl TuiApp {
     /// Render overview tab
     fn render_overview(&self, f: &mut Frame, area: Rect, spec_row: &SpecRow) {
         let spec: SpecData = serde_json::from_value(spec_row.data.clone()).unwrap();
-        
+
         let workflow_stages = ["requirements", "design", "tasks", "approval", "implemented"];
-        let current_stage_idx = workflow_stages.iter().position(|&s| s == spec.stage.to_string()).unwrap_or(0);
-        
+        let current_stage_idx = workflow_stages
+            .iter()
+            .position(|&s| s == spec.stage.to_string())
+            .unwrap_or(0);
+
         let mut workflow_viz = String::new();
         for (i, stage) in workflow_stages.iter().enumerate() {
             if i == current_stage_idx {
@@ -451,13 +474,16 @@ impl TuiApp {
     /// Render requirements tab
     fn render_requirements(&self, f: &mut Frame, area: Rect, spec_row: &SpecRow) {
         let spec: SpecData = serde_json::from_value(spec_row.data.clone()).unwrap();
-        
+
         let mut text = String::new();
         if spec.requirements.is_empty() {
             text.push_str("No requirements defined yet.\n");
         } else {
             for req in &spec.requirements {
-                text.push_str(&format!("\n{} - {} [{}]\n", req.id, req.title, req.priority));
+                text.push_str(&format!(
+                    "\n{} - {} [{}]\n",
+                    req.id, req.title, req.priority
+                ));
                 text.push_str(&format!("SHALL: {}\n", req.shall));
                 if let Some(rationale) = &req.rationale {
                     text.push_str(&format!("Rationale: {}\n", rationale));
@@ -480,13 +506,16 @@ impl TuiApp {
     /// Render tasks tab
     fn render_tasks(&self, f: &mut Frame, area: Rect, spec_row: &SpecRow) {
         let spec: SpecData = serde_json::from_value(spec_row.data.clone()).unwrap();
-        
+
         let mut text = String::new();
         if spec.tasks.is_empty() {
             text.push_str("No tasks defined yet.\n");
         } else {
             for task in &spec.tasks {
-                text.push_str(&format!("\n{} - {} [{}]\n", task.id, task.title, task.status));
+                text.push_str(&format!(
+                    "\n{} - {} [{}]\n",
+                    task.id, task.title, task.status
+                ));
                 text.push_str(&format!("{}\n", task.description));
                 text.push_str(&format!("Traces to: {}\n", task.requirement_ids.join(", ")));
                 text.push_str(&"-".repeat(60));
@@ -504,7 +533,7 @@ impl TuiApp {
     /// Render decisions tab
     fn render_decisions(&self, f: &mut Frame, area: Rect, spec_row: &SpecRow) {
         let spec: SpecData = serde_json::from_value(spec_row.data.clone()).unwrap();
-        
+
         let mut text = String::new();
         if spec.decisions.is_empty() {
             text.push_str("No design decisions documented yet.\n");
@@ -520,7 +549,11 @@ impl TuiApp {
         }
 
         let paragraph = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title("Design Decisions"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Design Decisions"),
+            )
             .wrap(Wrap { trim: true });
 
         f.render_widget(paragraph, area);
@@ -529,7 +562,7 @@ impl TuiApp {
     /// Render history tab
     fn render_history(&self, f: &mut Frame, area: Rect, spec_row: &SpecRow) {
         let spec: SpecData = serde_json::from_value(spec_row.data.clone()).unwrap();
-        
+
         let mut text = String::new();
         if spec.history.patches.is_empty() {
             text.push_str("No history recorded.\n");
@@ -538,13 +571,19 @@ impl TuiApp {
                 let timestamp = chrono::DateTime::from_timestamp(patch.timestamp, 0)
                     .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
                     .unwrap_or_else(|| "unknown".to_string());
-                text.push_str(&format!("{} | {} | {}\n  {}\n\n",
-                    timestamp, patch.actor, patch.op, patch.summary));
+                text.push_str(&format!(
+                    "{} | {} | {}\n  {}\n\n",
+                    timestamp, patch.actor, patch.op, patch.summary
+                ));
             }
         }
 
         let paragraph = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title("Change History"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Change History"),
+            )
             .wrap(Wrap { trim: true });
 
         f.render_widget(paragraph, area);
@@ -560,7 +599,8 @@ impl TuiApp {
                 "  ↑/↓: Navigate  c: Load Conflicts  o: Resolve  b: Bulk  a: Auto-merge  r: Refresh  q/Esc: Quit".to_string()
             }
         } else {
-            "  ↑/↓: Navigate  Tab: Switch Tab  1-4: Filter Boundary  r: Refresh  q/Esc: Quit".to_string()
+            "  ↑/↓: Navigate  Tab: Switch Tab  1-4: Filter Boundary  r: Refresh  q/Esc: Quit"
+                .to_string()
         };
 
         let footer = Paragraph::new(footer_text)
@@ -624,15 +664,18 @@ impl TuiApp {
 
     /// Refresh spec list from database
     fn refresh_specs(&mut self) -> Result<()> {
+        // Invalidate cache to see changes from other processes (e.g., MCP server)
+        self.db.invalidate_cache()?;
+
         let boundary = self.filter_boundary.as_ref().and_then(|b| b.parse().ok());
         self.specs = self.db.list_specs(boundary.as_ref(), None)?;
-        
+
         if !self.specs.is_empty() {
             self.list_state.select(Some(0));
         } else {
             self.list_state.select(None);
         }
-        
+
         Ok(())
     }
 
@@ -652,37 +695,42 @@ impl TuiApp {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Percentage(40),  // Conflict list
-                Constraint::Percentage(60),  // Conflict detail
+                Constraint::Percentage(40), // Conflict list
+                Constraint::Percentage(60), // Conflict detail
             ])
             .split(area);
 
         // Render conflict list
-        let items: Vec<ListItem> = self.conflicts.iter().enumerate().map(|(i, conflict)| {
-            let status_icon = match conflict.status {
-                ConflictStatus::Unresolved => "⚠",
-                ConflictStatus::ResolvedLocal => "✓",
-                ConflictStatus::ResolvedRemote => "✓",
-                ConflictStatus::ResolvedManual => "✓",
-            };
-            let content = format!("{} {} - {}", status_icon, i + 1, conflict.field_path);
-            let style = match conflict.status {
-                ConflictStatus::Unresolved => Style::default().fg(Color::Red),
-                _ => Style::default().fg(Color::Green),
-            };
-            ListItem::new(content).style(style)
-        }).collect();
+        let items: Vec<ListItem> = self
+            .conflicts
+            .iter()
+            .enumerate()
+            .map(|(i, conflict)| {
+                let status_icon = match conflict.status {
+                    ConflictStatus::Unresolved => "⚠",
+                    ConflictStatus::ResolvedLocal => "✓",
+                    ConflictStatus::ResolvedRemote => "✓",
+                    ConflictStatus::ResolvedManual => "✓",
+                };
+                let content = format!("{} {} - {}", status_icon, i + 1, conflict.field_path);
+                let style = match conflict.status {
+                    ConflictStatus::Unresolved => Style::default().fg(Color::Red),
+                    _ => Style::default().fg(Color::Green),
+                };
+                ListItem::new(content).style(style)
+            })
+            .collect();
 
         let list = List::new(items)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(format!("Conflicts ({})", self.conflicts.len()))
+                    .title(format!("Conflicts ({})", self.conflicts.len())),
             )
             .highlight_style(
                 Style::default()
                     .bg(Color::Blue)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             )
             .highlight_symbol(">> ");
 
@@ -694,7 +742,9 @@ impl TuiApp {
                 // Format values with diff highlighting
                 let local_val = format_conflict_value(&conflict.local_value);
                 let remote_val = format_conflict_value(&conflict.remote_value);
-                let base_val = conflict.base_value.as_ref()
+                let base_val = conflict
+                    .base_value
+                    .as_ref()
                     .map(|v| format_conflict_value(v))
                     .unwrap_or_else(|| "(no base)".to_string());
 
@@ -728,14 +778,20 @@ impl TuiApp {
                         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
                         .unwrap_or_else(|| "unknown".to_string()),
                     base_val,
-                    "─".repeat(30), local_marker,
+                    "─".repeat(30),
+                    local_marker,
                     local_val,
-                    "─".repeat(30), remote_marker,
+                    "─".repeat(30),
+                    remote_marker,
                     remote_val,
                 );
 
                 let paragraph = Paragraph::new(detail_text)
-                    .block(Block::default().borders(Borders::ALL).title("Conflict Details"))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title("Conflict Details"),
+                    )
                     .wrap(Wrap { trim: true })
                     .style(Style::default().fg(Color::Yellow));
 
@@ -749,8 +805,7 @@ impl TuiApp {
         let area = centered_rect(60, 40, f.area());
 
         // Clear background
-        let clear = Block::default()
-            .style(Style::default().bg(Color::Black));
+        let clear = Block::default().style(Style::default().bg(Color::Black));
         f.render_widget(clear, area);
 
         // Split into title and content
@@ -766,22 +821,37 @@ impl TuiApp {
         // Title
         let title = Paragraph::new("Select Resolution Strategy")
             .block(Block::default().borders(Borders::ALL))
-            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+            .style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            );
         f.render_widget(title, chunks[0]);
 
         // Strategies
-        let strategies = vec!["Ours (Keep Local)", "Theirs (Accept Remote)", "Merge (Auto)", "Manual"];
-        let items: Vec<ListItem> = strategies.iter().enumerate().map(|(i, s)| {
-            let style = if i == self.selected_strategy {
-                Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
-            ListItem::new(*s).style(style)
-        }).collect();
+        let strategies = vec![
+            "Ours (Keep Local)",
+            "Theirs (Accept Remote)",
+            "Merge (Auto)",
+            "Manual",
+        ];
+        let items: Vec<ListItem> = strategies
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let style = if i == self.selected_strategy {
+                    Style::default()
+                        .bg(Color::Blue)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(*s).style(style)
+            })
+            .collect();
 
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title("Strategies"));
+        let list =
+            List::new(items).block(Block::default().borders(Borders::ALL).title("Strategies"));
         f.render_widget(list, chunks[1]);
 
         // Instructions
@@ -794,12 +864,12 @@ impl TuiApp {
     /// Render status message
     fn render_status_message(&self, f: &mut Frame, message: &str) {
         let area = centered_rect(50, 20, f.area());
-        
+
         let paragraph = Paragraph::new(message)
             .block(Block::default().borders(Borders::ALL).title("Status"))
             .style(Style::default().fg(Color::Green))
             .wrap(Wrap { trim: true });
-        
+
         f.render_widget(paragraph, area);
     }
 
@@ -808,18 +878,23 @@ impl TuiApp {
         if let Some(selected) = self.list_state.selected() {
             if let Some(spec_row) = self.specs.get(selected) {
                 self.conflicts = self.db.get_conflicts(&spec_row.id)?;
-                
+
                 // Update statistics
                 self.conflict_stats.total = self.conflicts.len();
-                self.conflict_stats.unresolved = self.conflicts.iter()
+                self.conflict_stats.unresolved = self
+                    .conflicts
+                    .iter()
                     .filter(|c| matches!(c.status, ConflictStatus::Unresolved))
                     .count();
-                self.conflict_stats.resolved = self.conflict_stats.total - self.conflict_stats.unresolved;
-                
+                self.conflict_stats.resolved =
+                    self.conflict_stats.total - self.conflict_stats.unresolved;
+
                 if !self.conflicts.is_empty() {
                     self.conflict_list_state.select(Some(0));
-                    self.status_message = Some(format!("Loaded {} conflict(s) ({} unresolved)", 
-                        self.conflict_stats.total, self.conflict_stats.unresolved));
+                    self.status_message = Some(format!(
+                        "Loaded {} conflict(s) ({} unresolved)",
+                        self.conflict_stats.total, self.conflict_stats.unresolved
+                    ));
                 } else {
                     self.conflict_list_state.select(None);
                     self.status_message = Some("No conflicts found for this spec".to_string());
@@ -845,18 +920,23 @@ impl TuiApp {
                     Ok((resolved_value, status)) => {
                         // Update conflict status in database
                         self.db.update_conflict_status(&conflict.id, &status)?;
-                        
+
                         // Apply resolution to spec
                         if let Some(selected) = self.list_state.selected() {
                             if let Some(spec_row) = self.specs.get(selected) {
-                                let mut spec: SpecData = serde_json::from_value(spec_row.data.clone())?;
-                                ConflictResolver::apply_resolutions(&mut spec, &[(conflict.field_path.clone(), resolved_value)])?;
+                                let mut spec: SpecData =
+                                    serde_json::from_value(spec_row.data.clone())?;
+                                ConflictResolver::apply_resolutions(
+                                    &mut spec,
+                                    &[(conflict.field_path.clone(), resolved_value)],
+                                )?;
                                 self.db.update_spec(&spec)?;
                             }
                         }
 
                         self.show_resolution_popup = false;
-                        self.status_message = Some(format!("✓ Conflict resolved with strategy: {}", 
+                        self.status_message = Some(format!(
+                            "✓ Conflict resolved with strategy: {}",
                             match strategy {
                                 ResolutionStrategy::Ours => "ours",
                                 ResolutionStrategy::Theirs => "theirs",
@@ -883,8 +963,7 @@ impl TuiApp {
         let area = centered_rect(60, 40, f.area());
 
         // Clear background
-        let clear = Block::default()
-            .style(Style::default().bg(Color::Black));
+        let clear = Block::default().style(Style::default().bg(Color::Black));
         f.render_widget(clear, area);
 
         // Split into title and content
@@ -904,23 +983,37 @@ impl TuiApp {
         f.render_widget(title, chunks[0]);
 
         // Strategies
-        let strategies = vec!["Ours (Keep Local)", "Theirs (Accept Remote)", "Merge (Auto)", "Manual"];
-        let items: Vec<ListItem> = strategies.iter().enumerate().map(|(i, s)| {
-            let style = if i == self.selected_strategy {
-                Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
-            ListItem::new(*s).style(style)
-        }).collect();
+        let strategies = vec![
+            "Ours (Keep Local)",
+            "Theirs (Accept Remote)",
+            "Merge (Auto)",
+            "Manual",
+        ];
+        let items: Vec<ListItem> = strategies
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let style = if i == self.selected_strategy {
+                    Style::default()
+                        .bg(Color::Blue)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(*s).style(style)
+            })
+            .collect();
 
-        let unresolved_count = self.conflicts.iter()
+        let unresolved_count = self
+            .conflicts
+            .iter()
             .filter(|c| matches!(c.status, ConflictStatus::Unresolved))
             .count();
 
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL)
-                .title(format!("Strategy (will apply to {} conflicts)", unresolved_count)));
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(format!(
+            "Strategy (will apply to {} conflicts)",
+            unresolved_count
+        )));
         f.render_widget(list, chunks[1]);
 
         // Instructions
@@ -935,8 +1028,7 @@ impl TuiApp {
         let area = centered_rect(70, 50, f.area());
 
         // Clear background
-        let clear = Block::default()
-            .style(Style::default().bg(Color::Black));
+        let clear = Block::default().style(Style::default().bg(Color::Black));
         f.render_widget(clear, area);
 
         // Split into sections
@@ -953,7 +1045,11 @@ impl TuiApp {
         // Title
         let title = Paragraph::new("Manual Value Entry")
             .block(Block::default().borders(Borders::ALL))
-            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+            .style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            );
         f.render_widget(title, chunks[0]);
 
         // Show current values for context
@@ -1001,7 +1097,8 @@ impl TuiApp {
 
         if matches!(strategy, ResolutionStrategy::Manual) {
             self.show_bulk_popup = false;
-            self.status_message = Some("✗ Manual strategy not supported for bulk resolution".to_string());
+            self.status_message =
+                Some("✗ Manual strategy not supported for bulk resolution".to_string());
             return Ok(());
         }
 
@@ -1010,7 +1107,9 @@ impl TuiApp {
         let mut resolutions = Vec::new();
 
         // Collect unresolved conflicts
-        let unresolved_conflicts: Vec<_> = self.conflicts.iter()
+        let unresolved_conflicts: Vec<_> = self
+            .conflicts
+            .iter()
             .filter(|c| matches!(c.status, ConflictStatus::Unresolved))
             .cloned()
             .collect();
@@ -1069,33 +1168,44 @@ impl TuiApp {
                     serde_json::Value::Null
                 } else {
                     // Try parsing as JSON, otherwise treat as string
-                    serde_json::from_str(&self.manual_edit_input)
-                        .unwrap_or_else(|_| serde_json::Value::String(self.manual_edit_input.clone()))
+                    serde_json::from_str(&self.manual_edit_input).unwrap_or_else(|_| {
+                        serde_json::Value::String(self.manual_edit_input.clone())
+                    })
                 };
 
-                match ConflictResolver::resolve_conflict(conflict, ResolutionStrategy::Manual, Some(manual_value.clone())) {
+                match ConflictResolver::resolve_conflict(
+                    conflict,
+                    ResolutionStrategy::Manual,
+                    Some(manual_value.clone()),
+                ) {
                     Ok((resolved_value, status)) => {
                         // Update conflict status in database
                         self.db.update_conflict_status(&conflict.id, &status)?;
-                        
+
                         // Apply resolution to spec
                         if let Some(selected) = self.list_state.selected() {
                             if let Some(spec_row) = self.specs.get(selected) {
-                                let mut spec: SpecData = serde_json::from_value(spec_row.data.clone())?;
-                                ConflictResolver::apply_resolutions(&mut spec, &[(conflict.field_path.clone(), resolved_value)])?;
+                                let mut spec: SpecData =
+                                    serde_json::from_value(spec_row.data.clone())?;
+                                ConflictResolver::apply_resolutions(
+                                    &mut spec,
+                                    &[(conflict.field_path.clone(), resolved_value)],
+                                )?;
                                 self.db.update_spec(&spec)?;
                             }
                         }
 
                         self.show_manual_edit_popup = false;
-                        self.status_message = Some("✓ Manual value applied successfully".to_string());
+                        self.status_message =
+                            Some("✓ Manual value applied successfully".to_string());
 
                         // Reload conflicts
                         self.load_conflicts()?;
                     }
                     Err(e) => {
                         self.show_manual_edit_popup = false;
-                        self.status_message = Some(format!("✗ Failed to apply manual value: {}", e));
+                        self.status_message =
+                            Some(format!("✗ Failed to apply manual value: {}", e));
                     }
                 }
             }
@@ -1111,7 +1221,9 @@ impl TuiApp {
         let mut resolutions = Vec::new();
 
         // Try to auto-merge all unresolved conflicts
-        let unresolved_conflicts: Vec<_> = self.conflicts.iter()
+        let unresolved_conflicts: Vec<_> = self
+            .conflicts
+            .iter()
             .filter(|c| matches!(c.status, ConflictStatus::Unresolved))
             .cloned()
             .collect();
@@ -1166,7 +1278,9 @@ fn format_conflict_value(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Null => "(deleted)".to_string(),
-        serde_json::Value::Object(_) => serde_json::to_string_pretty(value).unwrap_or_else(|_| "(object)".to_string()),
+        serde_json::Value::Object(_) => {
+            serde_json::to_string_pretty(value).unwrap_or_else(|_| "(object)".to_string())
+        }
         serde_json::Value::Array(arr) => format!("(array with {} items)", arr.len()),
         _ => value.to_string(),
     }

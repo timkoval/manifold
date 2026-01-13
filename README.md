@@ -526,6 +526,8 @@ requirements → design → tasks → approval → implemented
 - ✅ **Phase 9** - Collaboration features (git sync, conflicts, reviews)
 - ✅ **Phase 10** - TUI conflict resolution
 - ✅ **Phase 11** - Enhanced TUI (manual editing, bulk ops, auto-merge)
+- ✅ **Phase 12** - Agent management via MCP (CLI -> MCP forwarding, `agent/*` tools, AgentManager singleton)
+- 🔜 **Phase 13** - Agent RPC & robustness (JSON-RPC bridge for MCP, channel-based shutdown, tests)
 
 ## 🧪 Testing
 

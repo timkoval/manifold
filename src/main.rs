@@ -2,23 +2,29 @@
 //!
 //! A local-first, MCP-native, JSON-canonical specification engine
 
+mod agent;
+mod collab;
 mod commands;
 mod config;
 mod db;
-mod models;
-mod validation;
-mod mcp;
-mod workflow;
-mod llm;
-mod tui;
 mod export;
-mod collab;
+mod llm;
+mod mcp;
+mod models;
+mod tui;
+mod validation;
+mod workflow;
 
 use clap::{Parser, Subcommand};
+use manifold::registry_commands;
 
 #[derive(Parser)]
 #[command(name = "manifold")]
-#[command(author, version, about = "The Global Spec Manifold - A local-first, MCP-native specification engine")]
+#[command(
+    author,
+    version,
+    about = "The Global Spec Manifold - A local-first, MCP-native specification engine"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -149,10 +155,22 @@ enum Commands {
         operation: ReviewOperationCli,
     },
 
+    /// Registry operations for community manifolds
+    Registry {
+        #[command(subcommand)]
+        operation: RegistryOperationCli,
+    },
+
     /// Conflict resolution operations
     Conflicts {
         #[command(subcommand)]
         operation: ConflictOperationCli,
+    },
+
+    /// Background agent operations
+    Agent {
+        #[command(subcommand)]
+        operation: AgentOperationCli,
     },
 }
 
@@ -263,6 +281,81 @@ enum ReviewOperationCli {
 }
 
 #[derive(Subcommand)]
+enum RegistryOperationCli {
+    /// Submit manifold to community registry
+    Submit {
+        /// Manifold ID (defaults to "default")
+        #[arg(short, long)]
+        manifold_id: Option<String>,
+
+        /// Public URL for manifold bundle
+        #[arg(short, long)]
+        public_url: Option<String>,
+
+        /// Description of manifold
+        #[arg(short, long)]
+        description: Option<String>,
+
+        /// GitHub username or identifier
+        #[arg(short, long)]
+        username: String,
+
+        /// GitHub personal access token
+        #[arg(long)]
+        github_token: String,
+
+        /// Branch name for PR (default: manifold-{id})
+        #[arg(short, long)]
+        branch: Option<String>,
+
+        /// Registry repository (default: manifold-community/registry)
+        #[arg(long)]
+        registry_repo: Option<String>,
+    },
+
+    /// List all manifolds in registry
+    List {
+        /// Search query (optional)
+        #[arg(short, long)]
+        query: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// GitHub personal access token (optional for public repos)
+        #[arg(long)]
+        github_token: Option<String>,
+
+        /// Registry repository (default: manifold-community/registry)
+        #[arg(long)]
+        registry_repo: Option<String>,
+    },
+
+    /// Search manifolds in registry
+    Search {
+        /// Search query
+        query: String,
+
+        /// Limit results
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+
+        /// GitHub personal access token (optional for public repos)
+        #[arg(long)]
+        github_token: Option<String>,
+
+        /// Registry repository (default: manifold-community/registry)
+        #[arg(long)]
+        registry_repo: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum ConflictOperationCli {
     /// List conflicts
     List {
@@ -274,22 +367,63 @@ enum ConflictOperationCli {
     Resolve {
         /// Conflict ID
         conflict_id: String,
-
         /// Resolution strategy: ours, theirs, manual
         #[arg(short, long, default_value = "manual")]
         strategy: String,
     },
 }
 
+#[derive(Subcommand)]
+enum AgentOperationCli {
+    /// Start an agent
+    Start {
+        /// Agent id
+        #[arg(short, long)]
+        id: String,
+        /// Interval in seconds
+        #[arg(short, long, default_value_t = 60)]
+        interval: u64,
+        /// Agent kind (indexer, registry-sync)
+        #[arg(short, long, default_value = "indexer")]
+        kind: String,
+    },
+    /// Stop an agent
+    Stop {
+        /// Agent id
+        #[arg(short, long)]
+        id: String,
+    },
+    /// List agents
+    List,
+}
+
+// Conversion functions from CLI enums to library enums
+
 // Conversion functions from CLI enums to library enums
 impl From<SyncOperationCli> for commands::SyncOperation {
     fn from(op: SyncOperationCli) -> Self {
         match op {
-            SyncOperationCli::Init { repo, remote } => commands::SyncOperation::Init { repo, remote },
-            SyncOperationCli::Push { id, message, remote, branch } => commands::SyncOperation::Push { id, message, remote, branch },
-            SyncOperationCli::Pull { id, remote, branch } => commands::SyncOperation::Pull { id, remote, branch },
+            SyncOperationCli::Init { repo, remote } => {
+                commands::SyncOperation::Init { repo, remote }
+            }
+            SyncOperationCli::Push {
+                id,
+                message,
+                remote,
+                branch,
+            } => commands::SyncOperation::Push {
+                id,
+                message,
+                remote,
+                branch,
+            },
+            SyncOperationCli::Pull { id, remote, branch } => {
+                commands::SyncOperation::Pull { id, remote, branch }
+            }
             SyncOperationCli::Status => commands::SyncOperation::Status,
-            SyncOperationCli::Diff { id, remote, branch } => commands::SyncOperation::Diff { id, remote, branch },
+            SyncOperationCli::Diff { id, remote, branch } => {
+                commands::SyncOperation::Diff { id, remote, branch }
+            }
         }
     }
 }
@@ -297,10 +431,66 @@ impl From<SyncOperationCli> for commands::SyncOperation {
 impl From<ReviewOperationCli> for commands::ReviewOperation {
     fn from(op: ReviewOperationCli) -> Self {
         match op {
-            ReviewOperationCli::Request { spec_id, reviewer } => commands::ReviewOperation::Request { spec_id, reviewer },
-            ReviewOperationCli::Approve { review_id, comment } => commands::ReviewOperation::Approve { review_id, comment },
-            ReviewOperationCli::Reject { review_id, comment } => commands::ReviewOperation::Reject { review_id, comment },
-            ReviewOperationCli::List { spec_id, status } => commands::ReviewOperation::List { spec_id, status },
+            ReviewOperationCli::Request { spec_id, reviewer } => {
+                commands::ReviewOperation::Request { spec_id, reviewer }
+            }
+            ReviewOperationCli::Approve { review_id, comment } => {
+                commands::ReviewOperation::Approve { review_id, comment }
+            }
+            ReviewOperationCli::Reject { review_id, comment } => {
+                commands::ReviewOperation::Reject { review_id, comment }
+            }
+            ReviewOperationCli::List { spec_id, status } => {
+                commands::ReviewOperation::List { spec_id, status }
+            }
+        }
+    }
+}
+
+impl From<RegistryOperationCli> for commands::RegistryOperation {
+    fn from(op: RegistryOperationCli) -> Self {
+        match op {
+            RegistryOperationCli::Submit {
+                manifold_id,
+                public_url,
+                description,
+                username,
+                github_token,
+                branch,
+                registry_repo,
+            } => commands::RegistryOperation::Submit {
+                manifold_id: manifold_id.unwrap_or_else(|| "default".to_string()),
+                public_url,
+                description,
+                username,
+                github_token,
+                branch,
+                registry_repo,
+            },
+            RegistryOperationCli::List {
+                query,
+                json,
+                github_token,
+                registry_repo,
+            } => commands::RegistryOperation::List {
+                query,
+                json,
+                github_token,
+                registry_repo,
+            },
+            RegistryOperationCli::Search {
+                query,
+                limit,
+                github_token,
+                registry_repo,
+                json,
+            } => commands::RegistryOperation::Search {
+                query,
+                limit,
+                github_token,
+                registry_repo,
+                json,
+            },
         }
     }
 }
@@ -309,7 +499,25 @@ impl From<ConflictOperationCli> for commands::ConflictOperation {
     fn from(op: ConflictOperationCli) -> Self {
         match op {
             ConflictOperationCli::List { spec_id } => commands::ConflictOperation::List { spec_id },
-            ConflictOperationCli::Resolve { conflict_id, strategy } => commands::ConflictOperation::Resolve { conflict_id, strategy },
+            ConflictOperationCli::Resolve {
+                conflict_id,
+                strategy,
+            } => commands::ConflictOperation::Resolve {
+                conflict_id,
+                strategy,
+            },
+        }
+    }
+}
+
+impl From<AgentOperationCli> for commands::AgentOperation {
+    fn from(op: AgentOperationCli) -> Self {
+        match op {
+            AgentOperationCli::Start { id, interval, kind } => {
+                commands::AgentOperation::Start { id, interval, kind }
+            }
+            AgentOperationCli::Stop { id } => commands::AgentOperation::Stop { id },
+            AgentOperationCli::List => commands::AgentOperation::List,
         }
     }
 }
@@ -362,7 +570,11 @@ async fn main() -> anyhow::Result<()> {
             let mut server = mcp::McpServer::new()?;
             server.run().await?;
         }
-        Commands::Workflow { id, operation, stage } => {
+        Commands::Workflow {
+            id,
+            operation,
+            stage,
+        } => {
             let op = match operation.as_str() {
                 "advance" => commands::WorkflowOperation::Advance {
                     target_stage: stage,
@@ -370,7 +582,10 @@ async fn main() -> anyhow::Result<()> {
                 "history" => commands::WorkflowOperation::History,
                 "status" => commands::WorkflowOperation::Status,
                 _ => {
-                    eprintln!("Invalid operation: {}. Use: advance, history, or status", operation);
+                    eprintln!(
+                        "Invalid operation: {}. Use: advance, history, or status",
+                        operation
+                    );
                     std::process::exit(1);
                 }
             };
@@ -389,9 +604,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Export { id, output, tables } => {
             let paths = config::ManifoldPaths::new()?;
             let db = db::Database::open(&paths)?;
-            
+
             let output_path = std::path::Path::new(&output);
-            
+
             if id == "all" {
                 // Export all specs
                 let spec_rows = db.list_specs(None, None)?;
@@ -399,15 +614,16 @@ async fn main() -> anyhow::Result<()> {
                     .into_iter()
                     .filter_map(|row| serde_json::from_value(row.data).ok())
                     .collect();
-                
+
                 export::MarkdownRenderer::export_multi(&specs, output_path, tables)?;
                 println!("✓ Exported {} specs to {}", specs.len(), output);
             } else {
                 // Export single spec
-                let spec_row = db.get_spec(&id)?
+                let spec_row = db
+                    .get_spec(&id)?
                     .ok_or_else(|| anyhow::anyhow!("Spec not found: {}", id))?;
                 let spec: models::SpecData = serde_json::from_value(spec_row.data)?;
-                
+
                 export::MarkdownRenderer::export_to_file(&spec, output_path, tables)?;
                 println!("✓ Exported spec {} to {}", id, output);
             }
@@ -420,6 +636,59 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Conflicts { operation } => {
             commands::conflict_command(operation.into())?;
+        }
+        Commands::Registry { operation } => {
+            let op: commands::RegistryOperation = operation.into();
+            match op {
+                commands::RegistryOperation::Submit {
+                    manifold_id,
+                    public_url,
+                    description,
+                    username,
+                    github_token,
+                    branch,
+                    registry_repo: _,
+                } => {
+                    registry_commands::registry_command(
+                        &manifold_id,
+                        &username,
+                        public_url.as_deref(),
+                        description.as_deref(),
+                        &github_token,
+                        branch.as_deref(),
+                    )?;
+                }
+                commands::RegistryOperation::List {
+                    query,
+                    json,
+                    github_token,
+                    registry_repo: _,
+                } => {
+                    registry_commands::registry_list(
+                        query.as_deref(),
+                        json,
+                        github_token.as_deref(),
+                    )?;
+                }
+                commands::RegistryOperation::Search {
+                    query,
+                    limit,
+                    github_token,
+                    registry_repo: _,
+                    json,
+                } => {
+                    registry_commands::registry_search(
+                        &query,
+                        limit,
+                        github_token.as_deref(),
+                        json,
+                    )?;
+                }
+            }
+        }
+        Commands::Agent { operation } => {
+            let op: commands::AgentOperation = operation.into();
+            commands::agent_command(op).await?;
         }
     }
 

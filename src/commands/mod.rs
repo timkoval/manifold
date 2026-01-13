@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 
+use crate::agent::AgentManager;
 use crate::collab::conflicts::ConflictResolver;
 use crate::collab::reviews::ReviewManager;
 use crate::collab::sync::SyncManager;
@@ -107,12 +108,76 @@ pub enum ConflictOperation {
     },
 }
 
+/// Registry operations
+#[derive(Debug, Clone)]
+pub enum RegistryOperation {
+    /// Submit manifold to community registry
+    Submit {
+        /// Manifold ID (defaults to "default")
+        manifold_id: String,
+
+        /// Public URL for manifold bundle
+        public_url: Option<String>,
+
+        /// Description of manifold
+        description: Option<String>,
+
+        /// GitHub username or identifier
+        username: String,
+
+        /// GitHub personal access token
+        github_token: String,
+
+        /// Branch name for PR (default: manifold-{id})
+        branch: Option<String>,
+
+        /// Registry repository (default: manifold-community/registry)
+        registry_repo: Option<String>,
+    },
+
+    /// List all manifolds in registry
+    List {
+        /// Search query (optional)
+        query: Option<String>,
+
+        /// Output as JSON
+        json: bool,
+
+        /// GitHub personal access token (optional for public repos)
+        github_token: Option<String>,
+
+        /// Registry repository (default: manifold-community/registry)
+        registry_repo: Option<String>,
+    },
+
+    /// Search manifolds in registry
+    Search {
+        /// Search query
+        query: String,
+
+        /// Limit results
+        limit: usize,
+
+        /// GitHub personal access token (optional for public repos)
+        github_token: Option<String>,
+
+        /// Registry repository (default: manifold-community/registry)
+        registry_repo: Option<String>,
+
+        /// Output as JSON
+        json: bool,
+    },
+}
+
 /// Initialize manifold for first-time setup
 pub fn init() -> Result<()> {
     let paths = ManifoldPaths::new()?;
 
     if paths.is_initialized() {
-        println!("Manifold is already initialized at {}", paths.root.display());
+        println!(
+            "Manifold is already initialized at {}",
+            paths.root.display()
+        );
         return Ok(());
     }
 
@@ -165,7 +230,7 @@ pub fn new_spec(project_id: &str, name: Option<&str>, boundary: Option<&str>) ->
     };
 
     let spec_name = name.unwrap_or(project_id).to_string();
-    
+
     // Generate spec_id
     let spec_id = crate::db::generate_spec_id(project_id);
     let spec = SpecData::new(spec_id.clone(), project_id.to_string(), spec_name, boundary);
@@ -311,17 +376,17 @@ pub enum OutputFormat {
 
 fn print_spec_summary(spec: &crate::models::SpecRow) {
     let data = &spec.data;
-    
+
     println!("Spec: {}", spec.id);
     println!("{}", "=".repeat(50));
-    
+
     if let Some(name) = data.get("name").and_then(|v| v.as_str()) {
         println!("Name:     {}", name);
     }
     println!("Project:  {}", spec.project);
     println!("Boundary: {}", spec.boundary);
     println!("Stage:    {}", spec.stage);
-    
+
     // Show requirements summary (LLM-native format)
     if let Some(reqs) = data.get("requirements").and_then(|v| v.as_array()) {
         println!();
@@ -336,27 +401,22 @@ fn print_spec_summary(spec: &crate::models::SpecRow) {
             }
         }
     }
-    
+
     // Show tasks summary
     if let Some(tasks) = data.get("tasks").and_then(|v| v.as_array()) {
         println!();
         println!("Tasks: {}", tasks.len());
-        let completed = tasks.iter().filter(|t| {
-            t.get("status").and_then(|v| v.as_str()) == Some("completed")
-        }).count();
+        let completed = tasks
+            .iter()
+            .filter(|t| t.get("status").and_then(|v| v.as_str()) == Some("completed"))
+            .count();
         println!("  Completed: {}/{}", completed, tasks.len());
     }
-    
+
     // Timestamps
     println!();
-    println!(
-        "Created:  {}",
-        format_timestamp(spec.created_at)
-    );
-    println!(
-        "Updated:  {}",
-        format_timestamp(spec.updated_at)
-    );
+    println!("Created:  {}", format_timestamp(spec.created_at));
+    println!("Updated:  {}", format_timestamp(spec.updated_at));
 }
 
 fn format_timestamp(ts: i64) -> String {
@@ -365,7 +425,7 @@ fn format_timestamp(ts: i64) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-fn truncate(s: &str, max: usize) -> String {
+pub fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
@@ -373,11 +433,9 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-fn ensure_initialized(paths: &ManifoldPaths) -> Result<()> {
+pub fn ensure_initialized(paths: &ManifoldPaths) -> Result<()> {
     if !paths.is_initialized() {
-        bail!(
-            "Manifold not initialized. Run `manifold init` first."
-        );
+        bail!("Manifold not initialized. Run `manifold init` first.");
     }
     Ok(())
 }
@@ -400,8 +458,8 @@ pub fn validate(id: &str, strict: bool) -> Result<()> {
         .with_context(|| format!("Spec not found: {}", id))?;
 
     // Parse spec data
-    let spec: SpecData = serde_json::from_value(spec_row.data)
-        .context("Failed to parse spec data")?;
+    let spec: SpecData =
+        serde_json::from_value(spec_row.data).context("Failed to parse spec data")?;
 
     println!("Validating spec: {}", id);
     println!();
@@ -447,14 +505,14 @@ pub fn join(source_id: &str, target_boundary: &str, dedup: bool) -> Result<()> {
         .map_err(|e| anyhow::anyhow!(e))?;
 
     let db = Database::open(&paths)?;
-    
+
     // Get source spec
     let source_row = db
         .get_spec(source_id)?
         .with_context(|| format!("Source spec not found: {}", source_id))?;
 
-    let mut source_spec: SpecData = serde_json::from_value(source_row.data)
-        .context("Failed to parse source spec")?;
+    let mut source_spec: SpecData =
+        serde_json::from_value(source_row.data).context("Failed to parse source spec")?;
 
     println!("Joining spec: {} → {}", source_id, target_boundary);
     println!("  Source boundary: {}", source_spec.boundary);
@@ -477,9 +535,13 @@ pub fn join(source_id: &str, target_boundary: &str, dedup: bool) -> Result<()> {
         if !duplicates.is_empty() {
             println!("found {} duplicate(s)", duplicates.len());
             for dup in &duplicates {
-                println!("  - {}: {}", dup.id, dup.data.get("name").and_then(|v| v.as_str()).unwrap_or("?"));
+                println!(
+                    "  - {}: {}",
+                    dup.id,
+                    dup.data.get("name").and_then(|v| v.as_str()).unwrap_or("?")
+                );
             }
-            
+
             // For now, just warn - in future we could implement merging logic
             println!();
             println!("⚠ Warning: Duplicates exist in target boundary");
@@ -494,7 +556,7 @@ pub fn join(source_id: &str, target_boundary: &str, dedup: bool) -> Result<()> {
     source_spec.spec_id = new_spec_id.clone();
     let old_boundary = source_spec.boundary.clone();
     source_spec.boundary = target_boundary;
-    
+
     // Update history
     source_spec.history.updated_at = chrono::Utc::now().timestamp();
     source_spec.history.patches.push(crate::models::PatchEntry {
@@ -510,7 +572,10 @@ pub fn join(source_id: &str, target_boundary: &str, dedup: bool) -> Result<()> {
     println!();
     println!("✓ Created new spec in target boundary: {}", new_spec_id);
     println!();
-    println!("Note: Original spec in {} boundary is unchanged", source_row.boundary);
+    println!(
+        "Note: Original spec in {} boundary is unchanged",
+        source_row.boundary
+    );
 
     Ok(())
 }
@@ -525,17 +590,17 @@ pub fn workflow(id: &str, operation: WorkflowOperation) -> Result<()> {
         .get_spec(id)?
         .with_context(|| format!("Spec not found: {}", id))?;
 
-    let mut spec: SpecData = serde_json::from_value(spec_row.data)
-        .context("Failed to parse spec data")?;
+    let mut spec: SpecData =
+        serde_json::from_value(spec_row.data).context("Failed to parse spec data")?;
 
     match operation {
         WorkflowOperation::Advance { target_stage } => {
             println!("Current stage: {}", spec.stage);
-            
+
             let target_stage = match target_stage {
-                Some(stage_str) => {
-                    stage_str.parse::<WorkflowStage>().map_err(|e| anyhow::anyhow!(e))?
-                }
+                Some(stage_str) => stage_str
+                    .parse::<WorkflowStage>()
+                    .map_err(|e| anyhow::anyhow!(e))?,
                 None => {
                     // Auto-advance to next stage
                     match WorkflowEngine::can_advance(&spec) {
@@ -547,15 +612,15 @@ pub fn workflow(id: &str, operation: WorkflowOperation) -> Result<()> {
                     }
                 }
             };
-            
+
             println!("Target stage:  {}", target_stage);
             println!();
-            
+
             // Validate and execute transition
             match WorkflowEngine::advance_stage(&spec, target_stage) {
                 Ok(transition) => {
                     println!("✓ Validation passed");
-                    
+
                     // Update spec
                     let old_stage = spec.stage.clone();
                     if !spec.stages_completed.contains(&old_stage) {
@@ -563,7 +628,7 @@ pub fn workflow(id: &str, operation: WorkflowOperation) -> Result<()> {
                     }
                     spec.stage = transition.to.clone();
                     spec.history.updated_at = chrono::Utc::now().timestamp();
-                    
+
                     // Log event
                     let timestamp = spec.history.updated_at;
                     db.log_workflow_event(
@@ -572,19 +637,22 @@ pub fn workflow(id: &str, operation: WorkflowOperation) -> Result<()> {
                         &transition.event.as_string(),
                         "user",
                         timestamp,
-                        Some(&format!("Advanced from {} to {}", transition.from, transition.to)),
+                        Some(&format!(
+                            "Advanced from {} to {}",
+                            transition.from, transition.to
+                        )),
                     )?;
-                    
+
                     // Update database
                     db.update_spec(&spec)?;
-                    
+
                     println!("✓ Advanced to stage: {}", spec.stage);
                     println!();
                     println!("Stages completed: {:?}", spec.stages_completed);
                 }
                 Err(e) => {
                     println!("✗ Transition failed: {}", e);
-                    
+
                     // Log failed validation
                     if let WorkflowError::ValidationFailed(msg) = &e {
                         db.log_workflow_event(
@@ -596,18 +664,18 @@ pub fn workflow(id: &str, operation: WorkflowOperation) -> Result<()> {
                             Some(&e.to_string()),
                         )?;
                     }
-                    
+
                     return Err(e.into());
                 }
             }
         }
-        
+
         WorkflowOperation::History => {
             println!("Workflow history for: {}", id);
             println!("{}", "=".repeat(80));
-            
+
             let events = db.get_workflow_events(id)?;
-            
+
             if events.is_empty() {
                 println!("No workflow events recorded");
             } else {
@@ -625,14 +693,14 @@ pub fn workflow(id: &str, operation: WorkflowOperation) -> Result<()> {
                 }
             }
         }
-        
+
         WorkflowOperation::Status => {
             println!("Workflow status for: {}", id);
             println!("{}", "=".repeat(50));
             println!("Current stage: {}", spec.stage);
             println!("Stages completed: {:?}", spec.stages_completed);
             println!();
-            
+
             match WorkflowEngine::can_advance(&spec) {
                 Ok(next_stage) => {
                     println!("✓ Can advance to: {}", next_stage);
@@ -658,7 +726,6 @@ pub enum WorkflowOperation {
 
 /// Sync command handler
 pub async fn sync_command(operation: SyncOperation) -> Result<()> {
-    
     let paths = ManifoldPaths::new()?;
     ensure_initialized(&paths)?;
 
@@ -666,7 +733,7 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
         SyncOperation::Init { repo, remote } => {
             let repo_path = std::path::PathBuf::from(&repo);
             let mut config = SyncConfig::new(repo_path);
-            
+
             if let Some(url) = remote {
                 config.remote_url = Some(url.clone());
             }
@@ -685,7 +752,12 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
             }
         }
 
-        SyncOperation::Push { id, message, remote, branch } => {
+        SyncOperation::Push {
+            id,
+            message,
+            remote,
+            branch,
+        } => {
             // Load sync config (in real impl, this would be stored)
             let sync_dir = paths.root.join("sync");
             let config = SyncConfig::new(sync_dir);
@@ -704,8 +776,9 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
                     pushed_count += 1;
                 }
 
-                let commit_msg = message.unwrap_or_else(|| format!("Update {} specs", pushed_count));
-                
+                let commit_msg =
+                    message.unwrap_or_else(|| format!("Update {} specs", pushed_count));
+
                 if let Ok(hash) = manager.commit(&commit_msg, &[]) {
                     if hash != "no-changes" {
                         manager.push(&remote, &branch)?;
@@ -718,14 +791,14 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
                 // Push single spec
                 let spec_row = db.get_spec(&id)?.context("Spec not found")?;
                 let spec: SpecData = serde_json::from_value(spec_row.data)?;
-                
+
                 let file_path = manager.export_spec(&spec)?;
                 let commit_msg = message.unwrap_or_else(|| format!("Update spec: {}", id));
-                
+
                 let hash = manager.commit(&commit_msg, &[file_path])?;
                 if hash != "no-changes" {
                     manager.push(&remote, &branch)?;
-                    
+
                     // Save sync metadata
                     let metadata = crate::collab::SyncMetadata {
                         spec_id: id.clone(),
@@ -735,7 +808,7 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
                         sync_status: crate::collab::SyncStatus::Synced,
                     };
                     db.save_sync_metadata(&metadata)?;
-                    
+
                     println!("✓ Pushed spec {} (commit: {})", id, &hash[..8]);
                 } else {
                     println!("✓ No changes to push");
@@ -763,47 +836,47 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
                             // Check for conflicts
                             if let Ok(Some(local_row)) = db.get_spec(&spec_id) {
                                 let local_spec: SpecData = serde_json::from_value(local_row.data)?;
-                                
+
                                 let conflicts = ConflictResolver::detect_conflicts(
                                     &local_spec,
                                     &remote_spec,
                                     None,
                                 )?;
 
-                                 if !conflicts.is_empty() {
-                                     println!("⚠ Conflict detected in spec: {}", spec_id);
-                                     for conflict in &conflicts {
-                                         db.save_conflict(conflict)?;
-                                     }
-                                     println!("  Run 'manifold conflicts list' to review");
-                                     
-                                     // Save metadata with conflicted status
-                                     if let Ok(hash) = manager.get_file_hash(&spec_id) {
-                                         let metadata = crate::collab::SyncMetadata {
-                                             spec_id: spec_id.clone(),
-                                             last_sync_timestamp: chrono::Utc::now().timestamp(),
-                                             last_sync_hash: hash,
-                                             remote_branch: Some(branch.clone()),
-                                             sync_status: crate::collab::SyncStatus::Conflicted,
-                                         };
-                                         let _ = db.save_sync_metadata(&metadata);
-                                     }
-                                 } else {
-                                     db.update_spec(&remote_spec)?;
-                                     pulled_count += 1;
-                                     
-                                     // Save metadata with synced status
-                                     if let Ok(hash) = manager.get_file_hash(&spec_id) {
-                                         let metadata = crate::collab::SyncMetadata {
-                                             spec_id: spec_id.clone(),
-                                             last_sync_timestamp: chrono::Utc::now().timestamp(),
-                                             last_sync_hash: hash,
-                                             remote_branch: Some(branch.clone()),
-                                             sync_status: crate::collab::SyncStatus::Synced,
-                                         };
-                                         let _ = db.save_sync_metadata(&metadata);
-                                     }
-                                 }
+                                if !conflicts.is_empty() {
+                                    println!("⚠ Conflict detected in spec: {}", spec_id);
+                                    for conflict in &conflicts {
+                                        db.save_conflict(conflict)?;
+                                    }
+                                    println!("  Run 'manifold conflicts list' to review");
+
+                                    // Save metadata with conflicted status
+                                    if let Ok(hash) = manager.get_file_hash(&spec_id) {
+                                        let metadata = crate::collab::SyncMetadata {
+                                            spec_id: spec_id.clone(),
+                                            last_sync_timestamp: chrono::Utc::now().timestamp(),
+                                            last_sync_hash: hash,
+                                            remote_branch: Some(branch.clone()),
+                                            sync_status: crate::collab::SyncStatus::Conflicted,
+                                        };
+                                        let _ = db.save_sync_metadata(&metadata);
+                                    }
+                                } else {
+                                    db.update_spec(&remote_spec)?;
+                                    pulled_count += 1;
+
+                                    // Save metadata with synced status
+                                    if let Ok(hash) = manager.get_file_hash(&spec_id) {
+                                        let metadata = crate::collab::SyncMetadata {
+                                            spec_id: spec_id.clone(),
+                                            last_sync_timestamp: chrono::Utc::now().timestamp(),
+                                            last_sync_hash: hash,
+                                            remote_branch: Some(branch.clone()),
+                                            sync_status: crate::collab::SyncStatus::Synced,
+                                        };
+                                        let _ = db.save_sync_metadata(&metadata);
+                                    }
+                                }
                             } else {
                                 db.insert_spec(&remote_spec)?;
                                 pulled_count += 1;
@@ -819,15 +892,12 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
             } else {
                 // Pull single spec
                 let remote_spec = manager.import_spec(&id)?;
-                
+
                 if let Ok(Some(local_row)) = db.get_spec(&id) {
                     let local_spec: SpecData = serde_json::from_value(local_row.data)?;
-                    
-                    let conflicts = ConflictResolver::detect_conflicts(
-                        &local_spec,
-                        &remote_spec,
-                        None,
-                    )?;
+
+                    let conflicts =
+                        ConflictResolver::detect_conflicts(&local_spec, &remote_spec, None)?;
 
                     if !conflicts.is_empty() {
                         println!("⚠ Conflict detected in spec: {}", id);
@@ -837,7 +907,7 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
                         }
                         println!();
                         println!("Run 'manifold conflicts resolve <conflict-id>' to resolve");
-                        
+
                         // Save metadata with conflicted status
                         if let Ok(hash) = manager.get_file_hash(&id) {
                             let metadata = crate::collab::SyncMetadata {
@@ -852,7 +922,7 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
                     } else {
                         db.update_spec(&remote_spec)?;
                         println!("✓ Pulled spec: {}", id);
-                        
+
                         // Save metadata with synced status
                         if let Ok(hash) = manager.get_file_hash(&id) {
                             let metadata = crate::collab::SyncMetadata {
@@ -868,7 +938,7 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
                 } else {
                     db.insert_spec(&remote_spec)?;
                     println!("✓ Pulled new spec: {}", id);
-                    
+
                     // Save metadata for new spec
                     if let Ok(hash) = manager.get_file_hash(&id) {
                         let metadata = crate::collab::SyncMetadata {
@@ -895,7 +965,7 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
 
             // Get all specs
             let specs = db.list_specs(None, None)?;
-            
+
             if specs.is_empty() {
                 println!("No specs to sync");
                 return Ok(());
@@ -903,10 +973,10 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
 
             let mut modified_count = 0;
             let mut synced_count = 0;
-            
+
             for spec_row in specs {
                 let spec_id = &spec_row.id;
-                
+
                 // Check sync metadata first
                 if let Ok(Some(metadata)) = db.get_sync_metadata(spec_id) {
                     let status_icon = match metadata.sync_status {
@@ -915,18 +985,23 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
                         crate::collab::SyncStatus::Conflicted => "✗",
                         crate::collab::SyncStatus::Unsynced => "?",
                     };
-                    
+
                     println!("  {} {} - {}", status_icon, spec_id, metadata.sync_status);
-                    
+
                     // Show additional info
-                    let last_sync = chrono::DateTime::from_timestamp(metadata.last_sync_timestamp, 0)
-                        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
-                    println!("    Last sync: {} ({})", last_sync, &metadata.last_sync_hash[..8]);
+                    let last_sync =
+                        chrono::DateTime::from_timestamp(metadata.last_sync_timestamp, 0)
+                            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+                    println!(
+                        "    Last sync: {} ({})",
+                        last_sync,
+                        &metadata.last_sync_hash[..8]
+                    );
                     if let Some(branch) = &metadata.remote_branch {
                         println!("    Branch: {}", branch);
                     }
-                    
+
                     match metadata.sync_status {
                         crate::collab::SyncStatus::Synced => synced_count += 1,
                         crate::collab::SyncStatus::Modified => modified_count += 1,
@@ -937,12 +1012,12 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
                     match manager.is_modified(spec_id) {
                         Ok(true) => {
                             println!("  ⚠ {} - MODIFIED", spec_id);
-                            
+
                             // Show file hash for tracking
                             if let Ok(hash) = manager.get_file_hash(spec_id) {
                                 println!("    Hash: {}", &hash[..8]);
                             }
-                            
+
                             modified_count += 1;
                         }
                         Ok(false) => {
@@ -955,9 +1030,12 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
                     }
                 }
             }
-            
+
             println!();
-            println!("Summary: {} synced, {} modified", synced_count, modified_count);
+            println!(
+                "Summary: {} synced, {} modified",
+                synced_count, modified_count
+            );
         }
 
         SyncOperation::Diff { id, remote, branch } => {
@@ -977,7 +1055,10 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
                 .context("Failed to fetch from remote")?;
 
             if !output.status.success() {
-                eprintln!("⚠ Failed to fetch from remote: {}", String::from_utf8_lossy(&output.stderr));
+                eprintln!(
+                    "⚠ Failed to fetch from remote: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
 
             // Get diff
@@ -1002,7 +1083,6 @@ pub async fn sync_command(operation: SyncOperation) -> Result<()> {
 
 /// Review command handler
 pub fn review_command(operation: ReviewOperation) -> Result<()> {
-    
     let paths = ManifoldPaths::new()?;
     ensure_initialized(&paths)?;
     let db = Database::open(&paths)?;
@@ -1058,7 +1138,10 @@ pub fn review_command(operation: ReviewOperation) -> Result<()> {
             };
 
             let filtered: Vec<_> = if let Some(status_filter) = status {
-                reviews.into_iter().filter(|r| r.status.to_string() == status_filter).collect()
+                reviews
+                    .into_iter()
+                    .filter(|r| r.status.to_string() == status_filter)
+                    .collect()
             } else {
                 reviews
             };
@@ -1082,9 +1165,51 @@ pub fn review_command(operation: ReviewOperation) -> Result<()> {
     Ok(())
 }
 
+/// Agent operations
+#[derive(Debug, Clone)]
+pub enum AgentOperation {
+    /// Start an agent: id, interval seconds, kind
+    Start {
+        id: String,
+        interval: u64,
+        kind: String,
+    },
+    /// Stop an agent by id
+    Stop { id: String },
+    /// List running agents
+    List,
+}
+
+/// Agent command handler
+pub async fn agent_command(operation: AgentOperation) -> Result<()> {
+    // Call MCP tools to control agents instead of local manager
+    match operation {
+        AgentOperation::Start { id, interval, kind } => {
+            let args = serde_json::json!({"id": id, "interval": interval, "kind": kind});
+            let _res = crate::agent::McpBridge::call_tool("agent/start", args).await?;
+            println!("Requested agent start");
+        }
+        AgentOperation::Stop { id } => {
+            let args = serde_json::json!({"id": id});
+            let _res = crate::agent::McpBridge::call_tool("agent/stop", args).await?;
+            println!("Requested agent stop");
+        }
+        AgentOperation::List => {
+            let args = serde_json::json!({});
+            let res = crate::agent::McpBridge::call_tool("agent/list", args).await?;
+            if let Some(agents) = res.get("agents") {
+                println!("Agents: {}", agents);
+            } else {
+                println!("No agents reported");
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Conflict command handler
 pub fn conflict_command(operation: ConflictOperation) -> Result<()> {
-    
     let paths = ManifoldPaths::new()?;
     ensure_initialized(&paths)?;
     let db = Database::open(&paths)?;
@@ -1111,9 +1236,13 @@ pub fn conflict_command(operation: ConflictOperation) -> Result<()> {
             }
         }
 
-        ConflictOperation::Resolve { conflict_id, strategy } => {
+        ConflictOperation::Resolve {
+            conflict_id,
+            strategy,
+        } => {
             let conflicts = db.get_conflicts("")?; // Get all conflicts
-            let conflict = conflicts.iter()
+            let conflict = conflicts
+                .iter()
                 .find(|c| c.id == conflict_id)
                 .context("Conflict not found")?;
 
@@ -1129,11 +1258,8 @@ pub fn conflict_command(operation: ConflictOperation) -> Result<()> {
             println!("{}", ConflictResolver::format_conflict(conflict));
             println!();
 
-            let (resolved_value, status) = ConflictResolver::resolve_conflict(
-                conflict,
-                resolution_strategy,
-                None,
-            )?;
+            let (resolved_value, status) =
+                ConflictResolver::resolve_conflict(conflict, resolution_strategy, None)?;
 
             // Update conflict status
             db.update_conflict_status(&conflict_id, &status)?;
@@ -1142,7 +1268,10 @@ pub fn conflict_command(operation: ConflictOperation) -> Result<()> {
             let spec_row = db.get_spec(&conflict.spec_id)?.context("Spec not found")?;
             let mut spec: SpecData = serde_json::from_value(spec_row.data)?;
 
-            ConflictResolver::apply_resolutions(&mut spec, &[(conflict.field_path.clone(), resolved_value)])?;
+            ConflictResolver::apply_resolutions(
+                &mut spec,
+                &[(conflict.field_path.clone(), resolved_value)],
+            )?;
             db.update_spec(&spec)?;
 
             println!("✓ Conflict resolved with strategy: {}", strategy);

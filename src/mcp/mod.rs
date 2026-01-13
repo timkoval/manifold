@@ -1,5 +1,5 @@
 //! MCP (Model Context Protocol) server for manifold
-//! 
+//!
 //! Implements JSON-RPC 2.0 over stdio for LLM integration.
 //! Tools exposed:
 //! - create_spec: Create new spec
@@ -7,14 +7,14 @@
 //! - advance_workflow: Move spec between workflow stages
 //! - query_manifold: Search/filter specs
 
-use anyhow::{Result, bail};
+use crate::config;
+use crate::db::Database;
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
-use crate::db::Database;
-use crate::config;
 
-mod tools;
+pub mod tools;
 
 /// JSON-RPC 2.0 request
 #[derive(Debug, Deserialize)]
@@ -69,7 +69,7 @@ impl McpServer {
 
         let stdin = io::stdin();
         let mut stdout = io::stdout();
-        
+
         for line in stdin.lock().lines() {
             let line = line?;
             if line.trim().is_empty() {
@@ -272,6 +272,9 @@ impl McpServer {
             "apply_patch" => tools::apply_patch(&mut self.db, arguments).await,
             "advance_workflow" => tools::advance_workflow(&mut self.db, arguments).await,
             "query_manifold" => tools::query_manifold(&self.db, arguments).await,
+            "agent/start" => tools::agent_start(&mut self.db, arguments).await,
+            "agent/stop" => tools::agent_stop(&mut self.db, arguments).await,
+            "agent/list" => tools::agent_list(&self.db, arguments).await,
             _ => bail!("Unknown tool: {}", tool_name),
         }
     }

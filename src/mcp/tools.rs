@@ -1,10 +1,15 @@
 //! MCP tool implementations
 
-use anyhow::{Result, bail};
-use serde_json::{json, Value};
+use crate::agent::AgentManager;
 use crate::db::Database;
-use crate::models::{SpecData, WorkflowStage, Boundary, PatchEntry};
+use crate::models::{Boundary, PatchEntry, SpecData, WorkflowStage};
 use crate::workflow::WorkflowEngine;
+use anyhow::{bail, Result};
+use once_cell::sync::Lazy;
+use serde_json::{json, Value};
+use std::sync::Mutex;
+
+static AGENT_MANAGER: Lazy<Mutex<AgentManager>> = Lazy::new(|| Mutex::new(AgentManager::new()));
 
 /// Create a new spec
 pub async fn create_spec(db: &mut Database, args: Value) -> Result<Value> {
@@ -78,7 +83,8 @@ pub async fn apply_patch(db: &mut Database, args: Value) -> Result<Value> {
         .ok_or_else(|| anyhow::anyhow!("Missing 'summary' parameter"))?;
 
     // Get current spec
-    let spec_row = db.get_spec(spec_id)?
+    let spec_row = db
+        .get_spec(spec_id)?
         .ok_or_else(|| anyhow::anyhow!("Spec not found: {}", spec_id))?;
     let mut spec: SpecData = serde_json::from_value(spec_row.data)?;
 
@@ -135,7 +141,8 @@ pub async fn advance_workflow(db: &mut Database, args: Value) -> Result<Value> {
     };
 
     // Get current spec
-    let spec_row = db.get_spec(spec_id)?
+    let spec_row = db
+        .get_spec(spec_id)?
         .ok_or_else(|| anyhow::anyhow!("Spec not found: {}", spec_id))?;
     let mut spec: SpecData = serde_json::from_value(spec_row.data)?;
 
@@ -167,7 +174,10 @@ pub async fn advance_workflow(db: &mut Database, args: Value) -> Result<Value> {
                 &transition.event.as_string(),
                 "mcp",
                 now,
-                Some(&format!("Advanced from {} to {}", transition.from, transition.to)),
+                Some(&format!(
+                    "Advanced from {} to {}",
+                    transition.from, transition.to
+                )),
             )?;
 
             // Update in database
@@ -236,8 +246,10 @@ pub async fn query_manifold(db: &Database, args: Value) -> Result<Value> {
         .map(|spec| {
             // Parse the data to get the name
             let spec_data: Result<SpecData, _> = serde_json::from_value(spec.data.clone());
-            let name = spec_data.map(|s| s.name).unwrap_or_else(|_| "Unknown".to_string());
-            
+            let name = spec_data
+                .map(|s| s.name)
+                .unwrap_or_else(|_| "Unknown".to_string());
+
             json!({
                 "spec_id": spec.id,
                 "project": spec.project,
@@ -254,4 +266,41 @@ pub async fn query_manifold(db: &Database, args: Value) -> Result<Value> {
         "count": results.len(),
         "specs": results
     }))
+}
+
+// Simple tools to control agents via MCP
+pub async fn agent_start(_db: &mut Database, args: Value) -> Result<Value> {
+    let id_str = args["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Missing 'id'"))?;
+    let id = id_str.to_string();
+    let interval = args["interval"].as_u64().unwrap_or(60);
+    let kind = args["kind"].as_str().unwrap_or("indexer");
+
+    let manager = AGENT_MANAGER.lock().unwrap();
+    // For now we create a task that calls McpBridge internally or uses the manager
+    // Note: manager.start_agent expects a closure; since we are in MCP context, keep a simple placeholder
+    let id_for_task = id.clone();
+    let task = move |_db_ref: &Database| -> Result<()> {
+        eprintln!("Agent {} running (via MCP)", id_for_task);
+        Ok(())
+    };
+    manager.start_agent(&id, interval, task)?;
+
+    Ok(json!({"success": true, "id": id, "interval": interval, "kind": kind}))
+}
+
+pub async fn agent_stop(_db: &mut Database, args: Value) -> Result<Value> {
+    let id = args["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Missing 'id'"))?;
+    let manager = AGENT_MANAGER.lock().unwrap();
+    manager.stop_agent(id)?;
+    Ok(json!({"success": true, "id": id}))
+}
+
+pub async fn agent_list(db: &Database, _args: Value) -> Result<Value> {
+    let manager = AGENT_MANAGER.lock().unwrap();
+    let list = manager.list_agents();
+    Ok(json!({"success": true, "agents": list}))
 }

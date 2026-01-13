@@ -7,7 +7,9 @@ use rusqlite::{params, Connection};
 
 use crate::collab::{Conflict, ConflictStatus, Review, ReviewStatus, SyncMetadata, SyncStatus};
 use crate::config::ManifoldPaths;
-use crate::models::{Boundary, SpecData, SpecRow, WorkflowStage};
+use crate::models::{
+    Boundary, ManifoldV2, Node, NodeRow, NodeType, SpecData, SpecRow, WorkflowStage,
+};
 
 /// Database wrapper
 pub struct Database {
@@ -17,8 +19,7 @@ pub struct Database {
 impl Database {
     /// Open an existing database
     pub fn open(paths: &ManifoldPaths) -> Result<Self> {
-        let conn =
-            Connection::open(&paths.db_file).context("Failed to open manifold database")?;
+        let conn = Connection::open(&paths.db_file).context("Failed to open manifold database")?;
         Ok(Self { conn })
     }
 
@@ -132,6 +133,59 @@ impl Database {
         )
         .context("Failed to create reviews table")?;
 
+        // Create v2 manifolds table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS manifolds (
+                manifold_id   TEXT PRIMARY KEY,
+                data         TEXT NOT NULL,
+                version      INTEGER NOT NULL DEFAULT 1,
+                updated_at   INTEGER NOT NULL,
+                created_at   INTEGER NOT NULL
+            )
+            "#,
+            [],
+        )
+        .context("Failed to create manifolds table")?;
+
+        // Create v2 nodes table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS nodes (
+                id            TEXT NOT NULL,
+                manifold_id   TEXT NOT NULL,
+                node_type     TEXT NOT NULL,
+                boundary      TEXT NOT NULL,
+                title         TEXT,
+                content       TEXT,
+                links         TEXT,
+                updated_at    INTEGER,
+                created_at    INTEGER,
+                PRIMARY KEY (id, manifold_id),
+                FOREIGN KEY (manifold_id) REFERENCES manifolds(manifold_id)
+            )
+            "#,
+            [],
+        )
+        .context("Failed to create nodes table")?;
+
+        // Create FTS5 virtual table for v2 nodes
+        conn.execute(
+            r#"
+            CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+                id,
+                manifold_id,
+                node_type,
+                boundary,
+                title,
+                content,
+                tokenize = 'unicode61'
+            )
+            "#,
+            [],
+        )
+        .context("Failed to create nodes FTS5 table")?;
+
         // Create indexes
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project)",
@@ -165,6 +219,18 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status)",
             [],
         )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nodes_manifold ON nodes(manifold_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(node_type)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nodes_boundary ON nodes(boundary)",
+            [],
+        )?;
 
         Ok(Self { conn })
     }
@@ -172,8 +238,7 @@ impl Database {
     /// Insert a new spec
     pub fn insert_spec(&self, spec: &SpecData) -> Result<String> {
         let id = spec.spec_id.clone();
-        let data_json =
-            serde_json::to_string(spec).context("Failed to serialize spec")?;
+        let data_json = serde_json::to_string(spec).context("Failed to serialize spec")?;
 
         self.conn
             .execute(
@@ -230,10 +295,7 @@ impl Database {
 
         // Update FTS index
         self.conn
-            .execute(
-                "DELETE FROM specs_fts WHERE id = ?1",
-                params![id],
-            )
+            .execute("DELETE FROM specs_fts WHERE id = ?1", params![id])
             .context("Failed to delete from FTS")?;
 
         let content = extract_searchable_content(spec);
@@ -298,8 +360,9 @@ impl Database {
         query.push_str(" ORDER BY updated_at DESC");
 
         let mut stmt = self.conn.prepare(&query)?;
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-        
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
         let rows = stmt.query_map(params_refs.as_slice(), |row| {
             let data_str: String = row.get(3)?;
             let data: serde_json::Value = serde_json::from_str(&data_str).unwrap_or_default();
@@ -445,7 +508,10 @@ impl Database {
                 last_sync_timestamp: row.get(1)?,
                 last_sync_hash: row.get(2)?,
                 remote_branch: row.get(3)?,
-                sync_status: row.get::<_, String>(4)?.parse().unwrap_or(SyncStatus::Unsynced),
+                sync_status: row
+                    .get::<_, String>(4)?
+                    .parse()
+                    .unwrap_or(SyncStatus::Unsynced),
             })
         });
 
@@ -496,7 +562,10 @@ impl Database {
                 remote_value: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_default(),
                 base_value: base_value_str.and_then(|s| serde_json::from_str(&s).ok()),
                 detected_at: row.get(6)?,
-                status: row.get::<_, String>(7)?.parse().unwrap_or(ConflictStatus::Unresolved),
+                status: row
+                    .get::<_, String>(7)?
+                    .parse()
+                    .unwrap_or(ConflictStatus::Unresolved),
             })
         })?;
 
@@ -554,7 +623,10 @@ impl Database {
                 spec_id: row.get(1)?,
                 requester: row.get(2)?,
                 reviewer: row.get(3)?,
-                status: row.get::<_, String>(4)?.parse().unwrap_or(ReviewStatus::Pending),
+                status: row
+                    .get::<_, String>(4)?
+                    .parse()
+                    .unwrap_or(ReviewStatus::Pending),
                 comment: row.get(5)?,
                 requested_at: row.get(6)?,
                 reviewed_at: row.get(7)?,
@@ -580,7 +652,10 @@ impl Database {
                 spec_id: row.get(1)?,
                 requester: row.get(2)?,
                 reviewer: row.get(3)?,
-                status: row.get::<_, String>(4)?.parse().unwrap_or(ReviewStatus::Pending),
+                status: row
+                    .get::<_, String>(4)?
+                    .parse()
+                    .unwrap_or(ReviewStatus::Pending),
                 comment: row.get(5)?,
                 requested_at: row.get(6)?,
                 reviewed_at: row.get(7)?,
@@ -591,6 +666,334 @@ impl Database {
             Ok(review) => Ok(Some(review)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
+        }
+    }
+
+    // ============================================================================
+    // V2 Manifold Operations
+    // ============================================================================
+
+    /// Create or update a manifold (v2)
+    pub fn upsert_manifold(&self, manifold: &ManifoldV2) -> Result<()> {
+        let data_json = serde_json::to_string(manifold).context("Failed to serialize manifold")?;
+
+        let now = chrono::Utc::now().timestamp();
+
+        self.conn
+            .execute(
+                r#"
+                INSERT OR REPLACE INTO manifolds (manifold_id, data, version, updated_at, created_at)
+                VALUES (?1, ?2, ?3, ?4, COALESCE((SELECT created_at FROM manifolds WHERE manifold_id = ?1), ?4))
+                "#,
+                params![
+                    manifold.manifold_id,
+                    data_json,
+                    manifold.version,
+                    now
+                ],
+            )
+            .context("Failed to upsert manifold")?;
+
+        Ok(())
+    }
+
+    /// Get a manifold by ID (v2)
+    pub fn get_manifold(&self, manifold_id: &str) -> Result<Option<ManifoldV2>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT data FROM manifolds WHERE manifold_id = ?1")?;
+
+        let result = stmt.query_row(params![manifold_id], |row| {
+            let data_str: String = row.get(0)?;
+            serde_json::from_str::<ManifoldV2>(&data_str)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))
+        });
+
+        match result {
+            Ok(manifold) => Ok(Some(manifold)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Insert a new node (v2)
+    pub fn insert_node(&self, manifold_id: &str, node: &Node) -> Result<()> {
+        let content_json = node
+            .content
+            .as_ref()
+            .map(|c| serde_json::to_value(c).ok())
+            .flatten();
+        let content_str = content_json
+            .as_ref()
+            .and_then(|v| serde_json::to_string(v).ok());
+        let links_json = serde_json::to_string(&node.links).ok();
+
+        let now = chrono::Utc::now().timestamp();
+
+        // Validate boundary exists in manifold
+        let manifold = self
+            .get_manifold(manifold_id)?
+            .context("Manifold not found")?;
+
+        if !manifold.boundaries.contains_key(&node.boundary) {
+            anyhow::bail!(
+                "Boundary '{}' is not defined in manifold. Available boundaries: {:?}",
+                node.boundary,
+                manifold.boundaries.keys().collect::<Vec<_>>()
+            );
+        }
+
+        self.conn
+            .execute(
+                r#"
+                INSERT INTO nodes (id, manifold_id, node_type, boundary, title, content, links, updated_at, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                "#,
+                params![
+                    node.id,
+                    manifold_id,
+                    node.node_type.to_string(),
+                    node.boundary,
+                    node.title.as_deref(),
+                    content_str.as_deref(),
+                    links_json.as_deref(),
+                    now,
+                    now
+                ],
+            )
+            .context("Failed to insert node")?;
+
+        // Index in FTS
+        let searchable_content = extract_node_searchable_content(node);
+        self.conn
+            .execute(
+                "INSERT INTO nodes_fts (id, manifold_id, node_type, boundary, title, content) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    node.id,
+                    manifold_id,
+                    node.node_type.to_string(),
+                    node.boundary,
+                    node.title.as_deref().unwrap_or(""),
+                    searchable_content
+                ],
+            )
+            .context("Failed to index node in FTS")?;
+
+        Ok(())
+    }
+
+    /// Update an existing node (v2)
+    pub fn update_node(&self, manifold_id: &str, node: &Node) -> Result<()> {
+        let content_json = node
+            .content
+            .as_ref()
+            .map(|c| serde_json::to_value(c).ok())
+            .flatten();
+        let content_str = content_json
+            .as_ref()
+            .and_then(|v| serde_json::to_string(v).ok());
+        let links_json = serde_json::to_string(&node.links).ok();
+
+        let now = chrono::Utc::now().timestamp();
+
+        self.conn
+            .execute(
+                r#"
+                UPDATE nodes
+                SET node_type = ?3, boundary = ?4, title = ?5, content = ?6, links = ?7, updated_at = ?8
+                WHERE id = ?1 AND manifold_id = ?2
+                "#,
+                params![
+                    node.id,
+                    manifold_id,
+                    node.node_type.to_string(),
+                    node.boundary,
+                    node.title.as_deref(),
+                    content_str.as_deref(),
+                    links_json.as_deref(),
+                    now
+                ],
+            )
+            .context("Failed to update node")?;
+
+        // Update FTS index
+        self.conn
+            .execute(
+                "DELETE FROM nodes_fts WHERE id = ?1 AND manifold_id = ?2",
+                params![node.id, manifold_id],
+            )
+            .context("Failed to delete from FTS")?;
+
+        let searchable_content = extract_node_searchable_content(node);
+        self.conn
+            .execute(
+                "INSERT INTO nodes_fts (id, manifold_id, node_type, boundary, title, content) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    node.id,
+                    manifold_id,
+                    node.node_type.to_string(),
+                    node.boundary,
+                    node.title.as_deref().unwrap_or(""),
+                    searchable_content
+                ],
+            )
+            .context("Failed to update FTS index")?;
+
+        Ok(())
+    }
+
+    /// Get a node by ID (v2)
+    pub fn get_node(&self, manifold_id: &str, node_id: &str) -> Result<Option<Node>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, node_type, boundary, title, content, links, updated_at, created_at FROM nodes WHERE id = ?1 AND manifold_id = ?2",
+        )?;
+
+        let result = stmt.query_row(params![node_id, manifold_id], |row| {
+            let node_type_str: String = row.get(1)?;
+            let node_type = node_type_str.parse().unwrap_or(NodeType::Spec);
+            let content_str: Option<String> = row.get(4)?;
+            let links_str: Option<String> = row.get(5)?;
+
+            let content = content_str.and_then(|s| serde_json::from_str(&s).ok());
+            let links: Vec<String> = links_str
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+
+            Ok(Node {
+                id: row.get(0)?,
+                node_type,
+                boundary: row.get(2)?,
+                title: row.get(3)?,
+                content,
+                links,
+                history: None, // Will be populated from content if needed
+                embeddings: None,
+            })
+        });
+
+        match result {
+            Ok(node) => Ok(Some(node)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// List nodes in a manifold with optional filters (v2)
+    pub fn list_nodes(
+        &self,
+        manifold_id: &str,
+        node_type: Option<&NodeType>,
+        boundary: Option<&str>,
+    ) -> Result<Vec<NodeRow>> {
+        let mut query = String::from(
+            "SELECT id, manifold_id, node_type, boundary, title, content, links, updated_at, created_at FROM nodes WHERE manifold_id = ?1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(manifold_id.to_string())];
+
+        if node_type.is_some() || boundary.is_some() {
+            if let Some(nt) = node_type {
+                query.push_str(" AND node_type = ?");
+                params_vec.push(Box::new(nt.to_string()));
+            }
+            if let Some(b) = boundary {
+                query.push_str(" AND boundary = ?");
+                params_vec.push(Box::new(b.to_string()));
+            }
+        }
+
+        query.push_str(" ORDER BY updated_at DESC");
+
+        let mut stmt = self.conn.prepare(&query)?;
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            let content_str: Option<String> = row.get(5)?;
+            let content = content_str.and_then(|s| serde_json::from_str(&s).ok());
+            let links_str: Option<String> = row.get(6)?;
+            let links: Vec<String> = links_str
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+
+            Ok(NodeRow {
+                id: row.get(0)?,
+                manifold_id: row.get(1)?,
+                node_type: row.get(2)?,
+                boundary: row.get(3)?,
+                title: row.get(4)?,
+                content,
+                links,
+                updated_at: row.get(7)?,
+                created_at: row.get(8)?,
+            })
+        })?;
+
+        let mut nodes = Vec::new();
+        for row in rows {
+            nodes.push(row?);
+        }
+        Ok(nodes)
+    }
+
+    /// Search nodes using FTS5 (v2)
+    pub fn search_nodes(&self, manifold_id: &str, query: &str) -> Result<Vec<NodeRow>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT n.id, n.manifold_id, n.node_type, n.boundary, n.title, n.content, n.links, n.updated_at, n.created_at
+            FROM nodes n
+            INNER JOIN nodes_fts f ON n.id = f.id AND n.manifold_id = f.manifold_id
+            WHERE n.manifold_id = ?1 AND nodes_fts MATCH ?2
+            ORDER BY rank
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![manifold_id, query], |row| {
+            let content_str: Option<String> = row.get(5)?;
+            let content = content_str.and_then(|s| serde_json::from_str(&s).ok());
+            let links_str: Option<String> = row.get(6)?;
+            let links: Vec<String> = links_str
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+
+            Ok(NodeRow {
+                id: row.get(0)?,
+                manifold_id: row.get(1)?,
+                node_type: row.get(2)?,
+                boundary: row.get(3)?,
+                title: row.get(4)?,
+                content,
+                links,
+                updated_at: row.get(7)?,
+                created_at: row.get(8)?,
+            })
+        })?;
+
+        let mut nodes = Vec::new();
+        for row in rows {
+            nodes.push(row?);
+        }
+        Ok(nodes)
+    }
+
+    /// Validate node against manifold boundaries
+    pub fn validate_node_boundary(&self, manifold_id: &str, node: &Node) -> Result<bool> {
+        let manifold = self.get_manifold(manifold_id)?;
+
+        match manifold {
+            Some(m) => {
+                let valid = m.boundaries.contains_key(&node.boundary);
+                if !valid {
+                    anyhow::bail!(
+                        "Boundary '{}' is not defined in manifold. Available: {:?}",
+                        node.boundary,
+                        m.boundaries.keys().collect::<Vec<_>>()
+                    );
+                }
+                Ok(valid)
+            }
+            None => {
+                anyhow::bail!("Manifold '{}' not found", manifold_id);
+            }
         }
     }
 }
@@ -610,15 +1013,19 @@ pub struct WorkflowEventRow {
 
 /// Generate a human-readable spec ID like "auric-raptor-torque"
 pub fn generate_spec_id(project: &str) -> String {
-    let adjectives = ["amber", "azure", "bold", "calm", "dark", "eager", "fair", "gold", "hazy", "keen"];
-    let nouns = ["anchor", "beacon", "cipher", "delta", "echo", "flux", "grid", "helix", "iris", "jade"];
-    
+    let adjectives = [
+        "amber", "azure", "bold", "calm", "dark", "eager", "fair", "gold", "hazy", "keen",
+    ];
+    let nouns = [
+        "anchor", "beacon", "cipher", "delta", "echo", "flux", "grid", "helix", "iris", "jade",
+    ];
+
     let uuid = uuid::Uuid::new_v4();
     let bytes = uuid.as_bytes();
-    
+
     let adj = adjectives[(bytes[0] as usize) % adjectives.len()];
     let noun = nouns[(bytes[1] as usize) % nouns.len()];
-    
+
     // Take first word from project or use a hash
     let suffix = project
         .split('-')
@@ -627,7 +1034,7 @@ pub fn generate_spec_id(project: &str) -> String {
         .chars()
         .take(8)
         .collect::<String>();
-    
+
     format!("{}-{}-{}", adj, noun, suffix)
 }
 
@@ -635,7 +1042,7 @@ pub fn generate_spec_id(project: &str) -> String {
 fn extract_searchable_content(spec: &SpecData) -> String {
     let mut content = Vec::new();
     content.push(spec.name.clone());
-    
+
     for req in &spec.requirements {
         content.push(req.title.clone());
         content.push(req.shall.clone());
@@ -650,17 +1057,75 @@ fn extract_searchable_content(spec: &SpecData) -> String {
             content.extend(scenario.then.clone());
         }
     }
-    
+
     for task in &spec.tasks {
         content.push(task.title.clone());
         content.push(task.description.clone());
     }
-    
+
     for decision in &spec.decisions {
         content.push(decision.title.clone());
         content.push(decision.context.clone());
         content.push(decision.decision.clone());
     }
-    
+
+    content.join(" ")
+}
+
+/// Extract searchable text content from a v2 node
+fn extract_node_searchable_content(node: &Node) -> String {
+    let mut content = Vec::new();
+
+    if let Some(title) = &node.title {
+        content.push(title.clone());
+    }
+
+    if let Some(node_content) = &node.content {
+        match node_content {
+            crate::models::NodeContent::Project(proj) => {
+                if let Some(name) = &proj.name {
+                    content.push(name.clone());
+                }
+                if let Some(desc) = &proj.description {
+                    content.push(desc.clone());
+                }
+                for req in &proj.requirements {
+                    content.push(req.title.clone());
+                    content.push(req.shall.clone());
+                }
+                for task in &proj.tasks {
+                    content.push(task.title.clone());
+                    content.push(task.description.clone());
+                }
+            }
+            crate::models::NodeContent::Spec(spec) => {
+                for req in &spec.requirements {
+                    content.push(req.title.clone());
+                    content.push(req.shall.clone());
+                }
+                for task in &spec.tasks {
+                    content.push(task.title.clone());
+                    content.push(task.description.clone());
+                }
+            }
+            crate::models::NodeContent::Knowledge(k) => {
+                content.push(k.topic.clone());
+                content.push(k.notes.clone());
+                content.extend(k.tags.clone());
+            }
+            crate::models::NodeContent::Diary(d) => {
+                content.push(d.date.clone());
+                content.push(d.reflection.clone());
+            }
+            crate::models::NodeContent::Research(r) => {
+                content.push(r.hub.clone());
+                for entry in &r.entries {
+                    content.push(entry.source.clone());
+                    content.push(entry.summary.clone());
+                }
+            }
+        }
+    }
+
     content.join(" ")
 }

@@ -4,11 +4,22 @@
 //! Optimized for LLM consumption and production
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Boundary type for spec isolation
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Boundary {
+    Personal,
+    Work,
+    Company,
+}
+
+/// Extended boundary visibility for v2 manifold
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BoundaryVisibility {
+    Public,
     Personal,
     Work,
     Company,
@@ -32,7 +43,38 @@ impl std::str::FromStr for Boundary {
             "personal" => Ok(Boundary::Personal),
             "work" => Ok(Boundary::Work),
             "company" => Ok(Boundary::Company),
-            _ => Err(format!("Invalid boundary: {}. Use: personal, work, company", s)),
+            _ => Err(format!(
+                "Invalid boundary: {}. Use: personal, work, company",
+                s
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for BoundaryVisibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BoundaryVisibility::Public => write!(f, "public"),
+            BoundaryVisibility::Personal => write!(f, "personal"),
+            BoundaryVisibility::Work => write!(f, "work"),
+            BoundaryVisibility::Company => write!(f, "company"),
+        }
+    }
+}
+
+impl std::str::FromStr for BoundaryVisibility {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "public" => Ok(BoundaryVisibility::Public),
+            "personal" => Ok(BoundaryVisibility::Personal),
+            "work" => Ok(BoundaryVisibility::Work),
+            "company" => Ok(BoundaryVisibility::Company),
+            _ => Err(format!(
+                "Invalid visibility: {}. Use: public, personal, work, company",
+                s
+            )),
         }
     }
 }
@@ -206,25 +248,25 @@ pub struct History {
 pub struct SpecData {
     #[serde(rename = "$schema", default = "default_schema")]
     pub schema: String,
-    
+
     pub spec_id: String,
     pub project: String,
     pub boundary: Boundary,
     pub name: String,
-    
+
     pub stage: WorkflowStage,
     #[serde(default)]
     pub stages_completed: Vec<WorkflowStage>,
-    
+
     #[serde(default)]
     pub requirements: Vec<Requirement>,
-    
+
     #[serde(default)]
     pub tasks: Vec<Task>,
-    
+
     #[serde(default)]
     pub decisions: Vec<Decision>,
-    
+
     pub history: History,
 }
 
@@ -254,21 +296,21 @@ impl SpecData {
             },
         }
     }
-    
+
     /// Get the current workflow stage
     /// Utility method for external consumers of the library
     #[allow(dead_code)]
     pub fn current_stage(&self) -> &WorkflowStage {
         &self.stage
     }
-    
+
     /// Get requirement by ID
     /// Utility method for external consumers of the library
     #[allow(dead_code)]
     pub fn get_requirement(&self, id: &str) -> Option<&Requirement> {
         self.requirements.iter().find(|r| r.id == id)
     }
-    
+
     /// Get task by ID
     /// Utility method for external consumers of the library
     #[allow(dead_code)]
@@ -287,4 +329,224 @@ pub struct SpecRow {
     pub stage: String,
     pub updated_at: i64,
     pub created_at: i64,
+}
+
+// ============================================================================
+// V2 Manifold Structures
+// ============================================================================
+
+/// Manifold v2 - The top-level document
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifoldV2 {
+    #[serde(rename = "$schema", default = "default_schema_v2")]
+    pub schema: String,
+
+    pub manifold_id: String,
+    pub boundaries: std::collections::HashMap<String, BoundaryConfig>,
+
+    pub nodes: Vec<Node>,
+
+    #[serde(default)]
+    pub version: i32,
+}
+
+pub fn default_schema_v2() -> String {
+    "manifold://core/v2".to_string()
+}
+
+/// Boundary configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoundaryConfig {
+    pub visibility: BoundaryVisibility,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Node type enumeration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum NodeType {
+    Project,
+    Spec,
+    Knowledge,
+    Diary,
+    Research,
+}
+
+impl std::fmt::Display for NodeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NodeType::Project => write!(f, "project"),
+            NodeType::Spec => write!(f, "spec"),
+            NodeType::Knowledge => write!(f, "knowledge"),
+            NodeType::Diary => write!(f, "diary"),
+            NodeType::Research => write!(f, "research"),
+        }
+    }
+}
+
+impl std::str::FromStr for NodeType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "project" => Ok(NodeType::Project),
+            "spec" => Ok(NodeType::Spec),
+            "knowledge" => Ok(NodeType::Knowledge),
+            "diary" => Ok(NodeType::Diary),
+            "research" => Ok(NodeType::Research),
+            _ => Err(format!(
+                "Invalid node type: {}. Use: project, spec, knowledge, diary, research",
+                s
+            )),
+        }
+    }
+}
+
+/// A node in the manifold
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Node {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub node_type: NodeType,
+    pub boundary: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<NodeContent>,
+
+    #[serde(default)]
+    pub links: Vec<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<History>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embeddings: Option<std::collections::HashMap<String, String>>,
+}
+
+/// Node content - varies by type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum NodeContent {
+    Project(ProjectContent),
+    Spec(SpecContent),
+    Knowledge(KnowledgeContent),
+    Diary(DiaryContent),
+    Research(ResearchContent),
+}
+
+/// Project node content
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectContent {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    #[serde(default)]
+    pub requirements: Vec<Requirement>,
+
+    #[serde(default)]
+    pub scenarios: Vec<Scenario>,
+
+    #[serde(default)]
+    pub tasks: Vec<Task>,
+
+    #[serde(default)]
+    pub decisions: Vec<Decision>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_stage: Option<String>,
+}
+
+/// Spec node content
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpecContent {
+    pub project_id: String,
+
+    #[serde(default)]
+    pub requirements: Vec<Requirement>,
+
+    #[serde(default)]
+    pub tasks: Vec<Task>,
+
+    #[serde(default)]
+    pub decisions: Vec<Decision>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_stage: Option<String>,
+
+    #[serde(default)]
+    pub stages_completed: Vec<String>,
+}
+
+/// Knowledge node content
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeContent {
+    pub topic: String,
+    pub notes: String,
+
+    #[serde(default)]
+    pub tags: Vec<String>,
+
+    #[serde(default)]
+    pub linked_specs: Vec<String>,
+}
+
+/// Diary node content
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiaryContent {
+    pub date: String,
+    pub reflection: String,
+
+    #[serde(default)]
+    pub linked_specs: Vec<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mood: Option<String>,
+}
+
+/// Research node content
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchContent {
+    pub hub: String,
+    pub entries: Vec<ResearchEntry>,
+
+    #[serde(default)]
+    pub linked_specs: Vec<String>,
+}
+
+/// Research entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchEntry {
+    pub source: String,
+    pub summary: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+// ============================================================================
+// Database row for v2 nodes
+// ============================================================================
+
+/// Database row representation of a v2 node
+#[derive(Debug, Clone)]
+pub struct NodeRow {
+    pub id: String,
+    pub manifold_id: String,
+    pub node_type: String,
+    pub boundary: String,
+    pub title: Option<String>,
+    pub content: Option<Value>,
+    pub links: Vec<String>,
+    pub updated_at: Option<i64>,
+    pub created_at: Option<i64>,
 }

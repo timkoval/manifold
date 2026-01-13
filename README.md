@@ -265,6 +265,35 @@ The Terminal UI provides a rich, interactive experience:
 
 Manifold includes a Model Context Protocol (MCP) server for AI agent integration:
 
+### Agents & MCP
+
+Agents run background tasks (indexers, registry-sync, etc.) and are managed through the MCP tool surface. The CLI exposes an `agent` command group that forwards control requests to MCP — the MCP process is the canonical manager of agents.
+
+Available MCP agent tools (via `tools/call`):
+
+- `agent/start` - start an agent
+- `agent/stop` - stop an agent
+- `agent/list` - list running agents
+
+CLI usage (forwards to MCP):
+
+```bash
+# Start MCP server in one terminal
+manifold serve
+
+# From another terminal (CLI forwards to MCP):
+manifold agent start --id myindex --interval 60 --kind indexer
+manifold agent list
+manifold agent stop --id myindex
+```
+
+Notes:
+- The CLI `agent` commands now call MCP tools under the hood (so the MCP server or a compatible MCP runtime must be running to manage agents).
+- Currently, the implementation uses an in-process MCP bridge for convenience in single-process runs; the bridge can be replaced with a JSON-RPC client to talk to a separate MCP server process.
+
+
+Manifold includes a Model Context Protocol (MCP) server for AI agent integration:
+
 ### Available Tools
 
 1. **create_spec** - Create new specifications

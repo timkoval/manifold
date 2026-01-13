@@ -303,6 +303,17 @@ manifold conflicts resolve <id> --strategy merge
 ## Conclusion
 
 Successfully implemented a complete collaboration subsystem for Manifold with:
+
+
+### Agent Management (MCP)
+
+Agent control (start/stop/list) is provided via MCP tools and the CLI forwards `agent` commands to MCP. The MCP tools are `agent/start`, `agent/stop`, and `agent/list`. These tools manipulate the process-wide AgentManager singleton, which runs periodic background tasks such as indexing and registry synchronization.
+
+Notes:
+- CLI: `manifold agent start|stop|list` — forwards to MCP, so `manifold serve` should be running for remote agent control.
+- The current development setup uses an in-process MCP bridge (calls `mcp::tools` directly) for convenience; to run agents from a separate process, replace the bridge with a JSON-RPC client to the MCP server.
+
+
 - ✅ Git-based synchronization
 - ✅ Intelligent conflict detection and resolution
 - ✅ Formal review and approval workflows
